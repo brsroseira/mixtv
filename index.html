@@ -30,7 +30,6 @@
     .header-logo img {
       width: 220px;
     }
-
     h2 {
       text-align: center;
       font-size: 30px;
@@ -151,6 +150,7 @@
       <button onclick="consultarStatus()">🔍 Consultar</button>
     </div>
   </div>
+
   <script>
     function consultarStatus() {
       const usuario = document.getElementById('consulta-usuario').value;
@@ -178,7 +178,7 @@
         link: document.getElementById("link").value
       };
 
-      fetch("https://script.google.com/macros/s/AKfycbwZCP0WiSPdikRcnQA22Yn7SWkE8MiKKAMF_v271hZ1tTXq09agZ7yofPcYD3g7TK9n/exec", {
+      fetch("https://script.google.com/macros/s/AKfycbwy1DsdHxI8h-9QZ28BpZ4DsScDVvaW60cbSHyOrr5pJVwt6VNhhk7tWVmYnZSVhRhF/exec", {
         method: "POST",
         body: JSON.stringify(data),
         headers: {
