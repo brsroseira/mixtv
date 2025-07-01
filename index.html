@@ -1,12 +1,11 @@
 <!DOCTYPE html>
 <html lang="pt-br">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Mix+ | Pedido de Conteúdo</title>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700&display=swap');
-
     body {
       margin: 0;
       padding: 0;
@@ -33,12 +32,11 @@
     h2 {
       text-align: center;
       font-size: 30px;
-      text-transform: uppercase;
-      font-family: 'Barlow Condensed', sans-serif;
-      font-weight: 700;
-      color: #ffffff;
-      letter-spacing: 1px;
       margin-bottom: 25px;
+      color: #ffffff;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1px;
     }
     label {
       display: block;
@@ -46,7 +44,7 @@
       font-size: 17px;
       font-weight: 600;
     }
-    input, select, textarea {
+    input, select {
       width: 100%;
       padding: 12px;
       border: none;
@@ -69,31 +67,6 @@
     button:hover {
       background-color: #c62828;
     }
-    .justwatch-link {
-      text-align: center;
-      margin-bottom: 20px;
-      font-size: 17px;
-    }
-    .justwatch-link a {
-      color: #4fc3f7;
-      font-weight: bold;
-      text-decoration: none;
-    }
-    .justwatch-link a:hover {
-      text-decoration: underline;
-    }
-    .consulta {
-      background-color: rgba(255,255,255,0.08);
-      margin-top: 30px;
-      padding: 25px;
-      border-radius: 12px;
-    }
-    .consulta h3 {
-      margin-top: 0;
-      font-size: 21px;
-      font-weight: 700;
-      margin-bottom: 12px;
-    }
     .intro-text {
       background-color: rgba(255, 255, 255, 0.15);
       border: 2px solid #ffffff;
@@ -107,6 +80,19 @@
       color: #fff;
       box-shadow: 0 0 10px rgba(255,255,255,0.2);
     }
+    .justwatch-link {
+      text-align: center;
+      margin-bottom: 20px;
+      font-size: 17px;
+    }
+    .justwatch-link a {
+      color: #4fc3f7;
+      font-weight: bold;
+      text-decoration: none;
+    }
+    .justwatch-link a:hover {
+      text-decoration: underline;
+    }
   </style>
 </head>
 <body>
@@ -114,93 +100,46 @@
     <div class="header-logo">
       <img src="https://i.ibb.co/nNByyyd6/logo-mixplus.png" alt="Logo Mix+ IA">
     </div>
+
     <div class="intro-text">
       Solicite qualquer conteúdo disponível em plataformas de streaming. <br>
       Verifique no <strong>JustWatch</strong> se o conteúdo está <strong>disponível para streaming</strong>.<br>
       Se constar como <em>não disponível</em>, o pedido será descartado.
     </div>
+
     <h2>PEDIDO DE CONTEÚDO</h2>
+
     <div class="justwatch-link">
       🔎 <a href="https://www.justwatch.com/br" target="_blank">Verifique a disponibilidade no JustWatch</a>
     </div>
-    <form onsubmit="enviarFormulario(event)">
+
+    <form action="https://script.google.com/macros/s/AKfycbwy1DsdHxI8h-9QZ28BpZ4DsScDVvaW60cbSHyOrr5pJVwt6VNhhk7tWVmYnZSVhRhF/exec" method="POST">
       <label for="usuario">Nome do Usuário</label>
       <input type="text" id="usuario" name="usuario" required>
+
       <label for="numero">Número do Usuário</label>
       <input type="text" id="numero" name="numero" required>
+
       <label for="whatsapp">WhatsApp</label>
       <input type="tel" id="whatsapp" name="whatsapp" placeholder="(DDD) 9XXXX-XXXX" required>
+
       <label for="titulo">Título do Pedido</label>
       <input type="text" id="titulo" name="titulo" required>
+
       <label for="tipo">Tipo</label>
       <select id="tipo" name="tipo">
         <option value="série">Série</option>
         <option value="filme">Filme</option>
       </select>
+
       <label for="episodio">Episódio ou Temporada</label>
       <input type="text" id="episodio" name="episodio">
+
       <label for="link">Link do JustWatch</label>
       <input type="url" id="link" name="link" placeholder="https://www.justwatch.com/br/..." required>
-      <button type="submit"><span id="botao-texto">📨 PEDIR CONTEÚDO</span> <span id="loading-spinner" style="display: none; margin-left: 8px;">⏳</span></button>
+
+      <button type="submit">📨 PEDIR CONTEÚDO</button>
     </form>
-    <div class="consulta">
-      <h3>Consultar Pedido</h3>
-      <label for="consulta-usuario">Nome do Usuário</label>
-      <input type="text" id="consulta-usuario" name="consulta-usuario" placeholder="Ex: joaosilva">
-      <button onclick="consultarStatus()">🔍 Consultar</button>
-    </div>
   </div>
-
-  <script>
-    function consultarStatus() {
-      const usuario = document.getElementById('consulta-usuario').value;
-      if(usuario) {
-        alert("Consulta enviada para: " + usuario + "\n(Em integração futura com planilha ou banco de dados)");
-      } else {
-        alert("Por favor, digite o nome do usuário.");
-      }
-    }
-
-    function enviarFormulario(event) {
-      event.preventDefault();
-      const botao = document.querySelector("form button[type='submit']");
-      botao.disabled = true;
-      document.getElementById("botao-texto").innerText = "Enviando...";
-      document.getElementById("loading-spinner").style.display = "inline-block";
-
-      const data = {
-        usuario: document.getElementById("usuario").value,
-        numero: document.getElementById("numero").value,
-        whatsapp: document.getElementById("whatsapp").value,
-        titulo: document.getElementById("titulo").value,
-        tipo: document.getElementById("tipo").value,
-        episodio: document.getElementById("episodio").value,
-        link: document.getElementById("link").value
-      };
-
-      fetch("https://script.google.com/macros/s/AKfycbwy1DsdHxI8h-9QZ28BpZ4DsScDVvaW60cbSHyOrr5pJVwt6VNhhk7tWVmYnZSVhRhF/exec", {
-        method: "POST",
-        body: JSON.stringify(data),
-        headers: {
-          "Content-Type": "application/json"
-        }
-      }).then(res => {
-        botao.disabled = false;
-        document.getElementById("botao-texto").innerText = "📨 PEDIR CONTEÚDO";
-        document.getElementById("loading-spinner").style.display = "none";
-        if (res.ok) {
-          alert("✅ Pedido enviado com sucesso!");
-          document.querySelector("form").reset();
-        } else {
-          alert("❌ Erro ao enviar o pedido. Tente novamente.");
-        }
-      }).catch(() => {
-        botao.disabled = false;
-        document.getElementById("botao-texto").innerText = "📨 PEDIR CONTEÚDO";
-        document.getElementById("loading-spinner").style.display = "none";
-        alert("❌ Erro de conexão. Verifique sua internet e tente novamente.");
-      });
-    }
-  </script>
 </body>
 </html>
