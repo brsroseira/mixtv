@@ -93,6 +93,18 @@
     .justwatch-link a:hover {
       text-decoration: underline;
     }
+    .success-message {
+      display: none;
+      background-color: #1b5e20;
+      padding: 30px;
+      border-radius: 12px;
+      text-align: center;
+      color: #fff;
+      font-size: 22px;
+      font-weight: bold;
+      box-shadow: 0 0 10px rgba(0,0,0,0.3);
+      margin-top: 30px;
+    }
   </style>
 </head>
 <body>
@@ -113,7 +125,12 @@
       🔎 <a href="https://www.justwatch.com/br" target="_blank">Verifique a disponibilidade no JustWatch</a>
     </div>
 
-    <form id="formulario">
+    <form id="formulario"
+      action="https://script.google.com/macros/s/AKfycbzfMbhYFxEmPAnZF3Lg4bc706eEPbz0SB5DgXqMI-C_JyvqXNxXr7K-OKDO4s-yDB0/exec"
+      method="POST"
+      target="invisible_iframe"
+      onsubmit="mostrarMensagem()">
+      
       <label for="usuario">Nome do Usuário</label>
       <input type="text" id="usuario" name="usuario" required>
 
@@ -140,58 +157,20 @@
 
       <button type="submit">📨 PEDIR CONTEÚDO</button>
     </form>
+
+    <div class="success-message" id="mensagemSucesso">
+      ✅ Pedido enviado com sucesso!<br><br>
+      Acompanhe seu conteúdo em breve.
+    </div>
+
+    <iframe name="invisible_iframe" style="display:none;"></iframe>
   </div>
 
   <script>
-    document.getElementById("formulario").addEventListener("submit", function(e) {
-      e.preventDefault();
-
-      const data = {
-        usuario: document.getElementById("usuario").value,
-        numero: document.getElementById("numero").value,
-        whatsapp: document.getElementById("whatsapp").value,
-        titulo: document.getElementById("titulo").value,
-        tipo: document.getElementById("tipo").value,
-        episodio: document.getElementById("episodio").value,
-        link: document.getElementById("link").value
-      };
-
-      fetch("https://script.google.com/macros/s/AKfycbzfMbhYFxEmPAnZF3Lg4bc706eEPbz0SB5DgXqMI-C_JyvqXNxXr7K-OKDO4s-yDB0/exec", {
-        method: "POST",
-        body: JSON.stringify(data),
-        headers: {
-          "Content-Type": "application/json"
-        }
-      })
-      .then(res => res.json())
-      .then(response => {
-        if (response.status === "sucesso") {
-          document.getElementById("formulario").style.display = "none";
-          const mensagem = document.createElement("div");
-          mensagem.innerHTML = `
-            <div style="
-              background-color: #1b5e20;
-              padding: 30px;
-              border-radius: 12px;
-              text-align: center;
-              color: #fff;
-              font-size: 22px;
-              font-weight: bold;
-              box-shadow: 0 0 10px rgba(0,0,0,0.3);
-              margin-top: 30px;">
-              ✅ Pedido enviado com sucesso!<br><br>
-              Acompanhe seu conteúdo em breve.
-            </div>
-          `;
-          document.querySelector(".form-container").appendChild(mensagem);
-        } else {
-          alert("Erro ao enviar: " + response.mensagem);
-        }
-      })
-      .catch(error => {
-        alert("Erro na conexão: " + error);
-      });
-    });
+    function mostrarMensagem() {
+      document.getElementById("formulario").style.display = "none";
+      document.getElementById("mensagemSucesso").style.display = "block";
+    }
   </script>
 </body>
 </html>
