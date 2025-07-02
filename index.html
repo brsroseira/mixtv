@@ -2,8 +2,8 @@
 <html lang="pt-br">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Mix+ | Pedido de Conteúdo</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700&display=swap');
     body {
@@ -93,14 +93,6 @@
     .justwatch-link a:hover {
       text-decoration: underline;
     }
-    .success-message {
-      text-align: center;
-      font-size: 20px;
-      font-weight: bold;
-      color: #00e676;
-      margin-top: 20px;
-      display: none;
-    }
   </style>
 </head>
 <body>
@@ -148,32 +140,41 @@
 
       <button type="submit">📨 PEDIR CONTEÚDO</button>
     </form>
-
-    <div class="success-message" id="mensagem">✅ Pedido enviado com sucesso!</div>
   </div>
 
   <script>
-    document.getElementById("formulario").addEventListener("submit", function (e) {
+    document.getElementById("formulario").addEventListener("submit", function(e) {
       e.preventDefault();
-      const form = e.target;
-      const dados = new FormData(form);
+
+      const dados = {
+        usuario: document.getElementById("usuario").value,
+        numero: document.getElementById("numero").value,
+        whatsapp: document.getElementById("whatsapp").value,
+        titulo: document.getElementById("titulo").value,
+        tipo: document.getElementById("tipo").value,
+        episodio: document.getElementById("episodio").value,
+        link: document.getElementById("link").value
+      };
 
       fetch("https://script.google.com/macros/s/AKfycbxEZyVS-uX2yxJEUHdrG_2IdVaaSd2w74Thcs36XStqh6zb6t08BUolo0kqMZkd5t-i/exec", {
         method: "POST",
-        body: dados
+        body: JSON.stringify(dados),
+        headers: {
+          "Content-Type": "application/json"
+        }
       })
-        .then(response => response.json())
-        .then(data => {
-          if (data.status === "sucesso") {
-            document.getElementById("mensagem").style.display = "block";
-            form.reset();
-          } else {
-            alert("Erro: " + data.mensagem);
-          }
-        })
-        .catch(error => {
-          alert("Erro de conexão: " + error.message);
-        });
+      .then(res => res.json())
+      .then(response => {
+        if (response.status === "sucesso") {
+          alert("✅ Pedido enviado com sucesso!");
+          document.getElementById("formulario").reset();
+        } else {
+          alert("❌ Erro ao enviar: " + response.mensagem);
+        }
+      })
+      .catch(error => {
+        alert("❌ Erro na conexão: " + error.message);
+      });
     });
   </script>
 </body>
