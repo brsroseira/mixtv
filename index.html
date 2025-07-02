@@ -166,7 +166,25 @@
       .then(res => res.json())
       .then(response => {
         if (response.status === "sucesso") {
-          window.location.href = "sucesso.html";
+          document.getElementById("formulario").style.display = "none";
+
+          const mensagem = document.createElement("div");
+          mensagem.innerHTML = `
+            <div style="
+              background-color: #1b5e20;
+              padding: 30px;
+              border-radius: 12px;
+              text-align: center;
+              color: #fff;
+              font-size: 22px;
+              font-weight: bold;
+              box-shadow: 0 0 10px rgba(0,0,0,0.3);
+              margin-top: 30px;">
+              ✅ Pedido enviado com sucesso!<br><br>
+              Acompanhe seu conteúdo em breve.
+            </div>
+          `;
+          document.querySelector(".form-container").appendChild(mensagem);
         } else {
           alert("Erro ao enviar: " + response.mensagem);
         }
