@@ -4,8 +4,8 @@
   <meta charset="UTF-8" />
   <title>Mix+ | Pedido de Conteúdo</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600&display=swap" rel="stylesheet">
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700&display=swap');
     body {
       margin: 0;
       padding: 0;
@@ -15,12 +15,12 @@
       color: #fff;
     }
     .form-container {
-      background-color: rgba(0, 0, 0, 0.85);
+      background-color: rgba(0, 0, 0, 0.6);
       max-width: 720px;
       margin: 20px auto;
       padding: 30px 35px;
       border-radius: 20px;
-      box-shadow: 0 0 30px rgba(0,0,0,0.8);
+      box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
     }
     .header-logo {
       text-align: center;
@@ -68,30 +68,21 @@
       background-color: #c62828;
     }
     .intro-text {
-      background-color: rgba(255, 255, 255, 0.15);
-      border: 2px solid #ffffff;
-      padding: 24px;
-      border-radius: 16px;
-      font-size: 22px;
-      font-weight: 700;
-      line-height: 1.6em;
-      margin-bottom: 28px;
+      background-color: rgba(255, 255, 255, 0.12);
+      padding: 18px;
+      border-radius: 14px;
+      font-family: 'Barlow Condensed', sans-serif;
+      font-size: 20px;
+      font-weight: 600;
+      line-height: 1.6;
       text-align: center;
       color: #fff;
-      box-shadow: 0 0 10px rgba(255,255,255,0.2);
+      border: 1px solid #ffffff44;
+      margin-bottom: 25px;
     }
-    .justwatch-link {
-      text-align: center;
-      margin-bottom: 20px;
-      font-size: 17px;
-    }
-    .justwatch-link a {
-      color: #4fc3f7;
-      font-weight: bold;
-      text-decoration: none;
-    }
-    .justwatch-link a:hover {
-      text-decoration: underline;
+    .consultar-btn {
+      background-color: #1976d2;
+      margin-top: 10px;
     }
   </style>
 </head>
@@ -109,11 +100,7 @@
 
     <h2>PEDIDO DE CONTEÚDO</h2>
 
-    <div class="justwatch-link">
-      🔎 <a href="https://www.justwatch.com/br" target="_blank">Verifique a disponibilidade no JustWatch</a>
-    </div>
-
-    <form method="POST" action="https://script.google.com/macros/s/AKfycbybyoq-o9R3GW1qV78Y0P5Z4LoRA-OFC0fd3DL6exw4_tDW4AIZ11WUsN0XmpDv5SGy/exec">
+    <form id="formulario">
       <label for="usuario">Nome do Usuário</label>
       <input type="text" id="usuario" name="usuario" required>
 
@@ -127,9 +114,12 @@
       <input type="text" id="titulo" name="titulo" required>
 
       <label for="tipo">Tipo</label>
-      <select id="tipo" name="tipo">
+      <select id="tipo" name="tipo" required>
         <option value="série">Série</option>
         <option value="filme">Filme</option>
+        <option value="novela">Novela</option>
+        <option value="anime">Anime</option>
+        <option value="documentario">Documentário</option>
       </select>
 
       <label for="episodio">Episódio ou Temporada</label>
@@ -140,6 +130,47 @@
 
       <button type="submit">📨 PEDIR CONTEÚDO</button>
     </form>
+
+    <a href="consulta.html">
+      <button class="consultar-btn">🔎 CONSULTAR ANÁLISE DO PEDIDO</button>
+    </a>
   </div>
+
+  <script>
+    document.getElementById("formulario").addEventListener("submit", function(e) {
+      e.preventDefault();
+
+      const dados = {
+        data: new Date().toLocaleString("pt-BR"),
+        usuario: document.getElementById("usuario").value,
+        numero: document.getElementById("numero").value,
+        whatsapp: document.getElementById("whatsapp").value,
+        titulo: document.getElementById("titulo").value,
+        tipo: document.getElementById("tipo").value,
+        episodio: document.getElementById("episodio").value,
+        link: document.getElementById("link").value
+      };
+
+      fetch("https://script.google.com/macros/s/AKfycbxULuUCzXRw7K1zubOFSrO39pVRZRugPYIezAZdHFINM8VTuoWB92yZY1NmxXnKyHxX/exec", {
+        method: "POST",
+        body: JSON.stringify(dados),
+        headers: {
+          "Content-Type": "application/json"
+        }
+      })
+      .then(res => res.json())
+      .then(response => {
+        if (response.status === "sucesso") {
+          alert("✅ Pedido enviado com sucesso!");
+          document.getElementById("formulario").reset();
+        } else {
+          alert("❌ Erro ao enviar: " + response.mensagem);
+        }
+      })
+      .catch(error => {
+        alert("❌ Erro na conexão: " + error.message);
+      });
+    });
+  </script>
 </body>
 </html>
