@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8" />
+  <title>Mix+ | Consulta de Pedido</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600&display=swap" rel="stylesheet">
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      background: #000 url('https://i.ibb.co/Pv38qQC8/ab4a6693-3ad5-4913-be49-b6d41d0bc4c6.png') no-repeat center top fixed;
+      background-size: cover;
+      font-family: 'Barlow Condensed', sans-serif;
+      color: #fff;
+    }
+    .container {
+      max-width: 800px;
+      margin: 40px auto;
+      padding: 30px;
+      background-color: rgba(0,0,0,0.7);
+      border-radius: 20px;
+      box-shadow: 0 0 30px rgba(0,0,0,0.6);
+    }
+    h2 {
+      text-align: center;
+      font-size: 28px;
+      margin-bottom: 25px;
+      color: #fff;
+      text-transform: uppercase;
+    }
+    input {
+      width: 100%;
+      padding: 12px;
+      border: none;
+      border-radius: 10px;
+      margin-bottom: 20px;
+      font-size: 16px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background-color: #111;
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    th, td {
+      padding: 12px;
+      text-align: left;
+      border-bottom: 1px solid #333;
+    }
+    th {
+      background-color: #222;
+    }
+    tr:hover {
+      background-color: #333;
+    }
+    .no-data {
+      text-align: center;
+      margin-top: 20px;
+      font-size: 18px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2>🔎 Consultar Análise do Pedido</h2>
+    <input type="text" id="filtro" placeholder="Digite seu nome ou número para buscar..." />
+    <div id="tabela-container"></div>
+  </div>
+
+  <script>
+    const planilhaURL = "https://opensheet.elk.sh/1nefcaME9BDxso-FLduR3Z24agKl_bUV6He3KkZqZCt0/Sheet1";
+
+    fetch(planilhaURL)
+      .then(res => res.json())
+      .then(data => {
+        window.todosDados = data;
+        mostrarTabela(data);
+      });
+
+    document.getElementById("filtro").addEventListener("input", function() {
+      const termo = this.value.toLowerCase();
+      const filtrado = window.todosDados.filter(row =>
+        row.usuario.toLowerCase().includes(termo) || row.numero.includes(termo)
+      );
+      mostrarTabela(filtrado);
+    });
+
+    function mostrarTabela(dados) {
+      const container = document.getElementById("tabela-container");
+      if (dados.length === 0) {
+        container.innerHTML = '<p class="no-data">Nenhum pedido encontrado.</p>';
+        return;
+      }
+
+      let html = "<table><tr><th>Data</th><th>Usuário</th><th>Título</th><th>Tipo</th><th>Status</th></tr>";
+      dados.forEach(l => {
+        html += `<tr><td>${l.data}</td><td>${l.usuario}</td><td>${l.titulo}</td><td>${l.tipo}</td><td>${l.status || "Pendente"}</td></tr>`;
+      });
+      html += "</table>";
+      container.innerHTML = html;
+    }
+  </script>
+</body>
+</html>
