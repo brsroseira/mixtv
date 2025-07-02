@@ -117,17 +117,18 @@
           tdData.textContent = new Date(linha.Data).toLocaleString("pt-BR");
 
           const tdUsuario = document.createElement("td");
-          tdUsuario.textContent = linha.Usuário;
+          tdUsuario.textContent = linha.Usuário || linha.usuario;
 
           const tdTitulo = document.createElement("td");
-          tdTitulo.textContent = linha.Título;
+          tdTitulo.textContent = linha.Título || linha.titulo;
 
           const tdTipo = document.createElement("td");
-          tdTipo.textContent = linha.Tipo;
+          tdTipo.textContent = linha.Tipo || linha.tipo;
 
           const tdStatus = document.createElement("td");
-          tdStatus.textContent = linha.Status || "Pendente";
-          tdStatus.className = (linha.Status || "").toLowerCase() === "feito" ? "status-feito" : "status-pendente";
+          const status = (linha.Status || linha.status || "Pendente").trim().toLowerCase();
+          tdStatus.textContent = status.charAt(0).toUpperCase() + status.slice(1);
+          tdStatus.className = status === "feito" ? "status-feito" : "status-pendente";
 
           tr.appendChild(tdData);
           tr.appendChild(tdUsuario);
