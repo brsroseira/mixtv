@@ -96,7 +96,17 @@
 
       let html = "<table><tr><th>Data</th><th>Usuário</th><th>Título</th><th>Tipo</th><th>Status</th></tr>";
       dados.forEach(l => {
-        html += `<tr><td>${l.data}</td><td>${l.usuario}</td><td>${l.titulo}</td><td>${l.tipo}</td><td>${l.status || "Pendente"}</td></tr>`;
+        const status = l.status?.toLowerCase() === "feito"
+          ? '<span style="color: #00e676; font-weight: bold;">Feito</span>'
+          : '<span style="color: #ffeb3b; font-weight: bold;">Pendente</span>';
+
+        html += `<tr>
+          <td>${l.data}</td>
+          <td>${l.usuario}</td>
+          <td>${l.titulo}</td>
+          <td>${l.tipo}</td>
+          <td>${status}</td>
+        </tr>`;
       });
       html += "</table>";
       container.innerHTML = html;
