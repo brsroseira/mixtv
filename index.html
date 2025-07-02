@@ -113,7 +113,7 @@
       🔎 <a href="https://www.justwatch.com/br" target="_blank">Verifique a disponibilidade no JustWatch</a>
     </div>
 
-    <form action="https://script.google.com/macros/s/AKfycbzSiXRRpXcVo-qnQ_1ITCQe_xuXvVGGJGvsmr3yKvs1k6_HxCksyx2ud8Glgqf7Edw/exec" method="POST">
+    <form id="formulario">
       <label for="usuario">Nome do Usuário</label>
       <input type="text" id="usuario" name="usuario" required>
 
@@ -141,5 +141,40 @@
       <button type="submit">📨 PEDIR CONTEÚDO</button>
     </form>
   </div>
+
+  <script>
+    document.getElementById("formulario").addEventListener("submit", function(e) {
+      e.preventDefault();
+
+      const data = {
+        usuario: document.getElementById("usuario").value,
+        numero: document.getElementById("numero").value,
+        whatsapp: document.getElementById("whatsapp").value,
+        titulo: document.getElementById("titulo").value,
+        tipo: document.getElementById("tipo").value,
+        episodio: document.getElementById("episodio").value,
+        link: document.getElementById("link").value
+      };
+
+      fetch("https://script.google.com/macros/s/AKfycbzSiXRRpXcVo-qnQ_1ITCQe_xuXvVGGJGvsmr3yKvs1k6_HxCksyx2ud8Glgqf7Edw/exec", {
+        method: "POST",
+        body: JSON.stringify(data),
+        headers: {
+          "Content-Type": "application/json"
+        }
+      })
+      .then(res => res.json())
+      .then(response => {
+        if (response.status === "sucesso") {
+          window.location.href = "sucesso.html";
+        } else {
+          alert("Erro ao enviar: " + response.mensagem);
+        }
+      })
+      .catch(error => {
+        alert("Erro na conexão: " + error);
+      });
+    });
+  </script>
 </body>
 </html>
