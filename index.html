@@ -93,6 +93,15 @@
     .justwatch-link a:hover {
       text-decoration: underline;
     }
+    #retorno {
+      margin-top: 20px;
+      padding: 15px;
+      background-color: rgba(255,255,255,0.1);
+      border-radius: 10px;
+      text-align: center;
+      font-weight: bold;
+      font-size: 18px;
+    }
   </style>
 </head>
 <body>
@@ -113,7 +122,7 @@
       🔎 <a href="https://www.justwatch.com/br" target="_blank">Verifique a disponibilidade no JustWatch</a>
     </div>
 
-    <form id="formulario">
+    <form id="formulario" action="https://script.google.com/macros/s/AKfycbxEZyVS-uX2yxJEUHdrG_2IdVaaSd2w74Thcs36XStqh6zb6t08BUolo0kqMZkd5t-i/exec" method="POST" target="iframeRetorno">
       <label for="usuario">Nome do Usuário</label>
       <input type="text" id="usuario" name="usuario" required>
 
@@ -140,42 +149,22 @@
 
       <button type="submit">📨 PEDIR CONTEÚDO</button>
     </form>
+
+    <iframe name="iframeRetorno" style="display:none;" onload="mensagemEnviada()"></iframe>
+
+    <div id="retorno"></div>
   </div>
 
   <script>
-    document.getElementById("formulario").addEventListener("submit", function(e) {
-      e.preventDefault();
+    function mensagemEnviada() {
+      const form = document.getElementById("formulario");
+      const retorno = document.getElementById("retorno");
 
-      const dados = {
-        usuario: document.getElementById("usuario").value,
-        numero: document.getElementById("numero").value,
-        whatsapp: document.getElementById("whatsapp").value,
-        titulo: document.getElementById("titulo").value,
-        tipo: document.getElementById("tipo").value,
-        episodio: document.getElementById("episodio").value,
-        link: document.getElementById("link").value
-      };
-
-      fetch("https://script.google.com/macros/s/AKfycbxEZyVS-uX2yxJEUHdrG_2IdVaaSd2w74Thcs36XStqh6zb6t08BUolo0kqMZkd5t-i/exec", {
-        method: "POST",
-        body: JSON.stringify(dados),
-        headers: {
-          "Content-Type": "application/json"
-        }
-      })
-      .then(res => res.json())
-      .then(response => {
-        if (response.status === "sucesso") {
-          alert("✅ Pedido enviado com sucesso!");
-          document.getElementById("formulario").reset();
-        } else {
-          alert("❌ Erro ao enviar: " + response.mensagem);
-        }
-      })
-      .catch(error => {
-        alert("❌ Erro na conexão: " + error.message);
-      });
-    });
+      if (form.usuario.value !== "") {
+        retorno.innerText = "✅ Pedido enviado com sucesso!";
+        form.reset();
+      }
+    }
   </script>
 </body>
 </html>
