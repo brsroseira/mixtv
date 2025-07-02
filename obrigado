@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pedido Enviado</title>
+  <style>
+    body {
+      background-color: #000;
+      color: #00e676;
+      font-family: 'Barlow Condensed', sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      height: 100vh;
+      margin: 0;
+      padding: 20px;
+    }
+    .mensagem {
+      background-color: #121212;
+      padding: 30px;
+      border-radius: 12px;
+      box-shadow: 0 0 15px rgba(0,255,0,0.3);
+    }
+    .mensagem h1 {
+      font-size: 32px;
+      margin-bottom: 20px;
+    }
+    .mensagem a {
+      color: #4fc3f7;
+      text-decoration: none;
+      font-size: 18px;
+      font-weight: bold;
+    }
+    .mensagem a:hover {
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+  <div class="mensagem">
+    <h1>✅ Pedido enviado com sucesso!</h1>
+    <p><a href="index.html">Voltar ao formulário</a></p>
+  </div>
+</body>
+</html>
