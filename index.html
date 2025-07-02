@@ -99,6 +99,7 @@
       font-weight: bold;
       color: #00e676;
       margin-top: 20px;
+      display: none;
     }
   </style>
 </head>
@@ -120,7 +121,7 @@
       🔎 <a href="https://www.justwatch.com/br" target="_blank">Verifique a disponibilidade no JustWatch</a>
     </div>
 
-    <form id="formulario" action="https://script.google.com/macros/s/AKfycbxEZyVS-uX2yxJEUHdrG_2IdVaaSd2w74Thcs36XStqh6zb6t08BUolo0kqMZkd5t-i/exec" method="POST">
+    <form id="formulario">
       <label for="usuario">Nome do Usuário</label>
       <input type="text" id="usuario" name="usuario" required>
 
@@ -148,29 +149,31 @@
       <button type="submit">📨 PEDIR CONTEÚDO</button>
     </form>
 
-    <div class="success-message" id="mensagem"></div>
+    <div class="success-message" id="mensagem">✅ Pedido enviado com sucesso!</div>
   </div>
 
   <script>
-    const formulario = document.getElementById("formulario");
-    const mensagem = document.getElementById("mensagem");
-
-    formulario.addEventListener("submit", function(e) {
+    document.getElementById("formulario").addEventListener("submit", function (e) {
       e.preventDefault();
-      const dados = new FormData(formulario);
+      const form = e.target;
+      const dados = new FormData(form);
 
-      fetch(formulario.action, {
+      fetch("https://script.google.com/macros/s/AKfycbxEZyVS-uX2yxJEUHdrG_2IdVaaSd2w74Thcs36XStqh6zb6t08BUolo0kqMZkd5t-i/exec", {
         method: "POST",
         body: dados
       })
-      .then(response => response.text())
-      .then(msg => {
-        mensagem.innerText = "✅ Pedido enviado com sucesso!";
-        formulario.reset();
-      })
-      .catch(error => {
-        mensagem.innerText = "❌ Erro ao enviar. Tente novamente.";
-      });
+        .then(response => response.json())
+        .then(data => {
+          if (data.status === "sucesso") {
+            document.getElementById("mensagem").style.display = "block";
+            form.reset();
+          } else {
+            alert("Erro: " + data.mensagem);
+          }
+        })
+        .catch(error => {
+          alert("Erro de conexão: " + error.message);
+        });
     });
   </script>
 </body>
