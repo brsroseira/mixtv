@@ -14,6 +14,7 @@
       font-family: 'Barlow Condensed', sans-serif;
       color: #fff;
     }
+
     .form-container {
       background-color: rgba(0, 0, 0, 0.85);
       max-width: 720px;
@@ -22,13 +23,16 @@
       border-radius: 20px;
       box-shadow: 0 0 30px rgba(0,0,0,0.8);
     }
+
     .header-logo {
       text-align: center;
       margin-bottom: 10px;
     }
+
     .header-logo img {
       width: 220px;
     }
+
     h2 {
       text-align: center;
       font-size: 30px;
@@ -38,12 +42,14 @@
       text-transform: uppercase;
       letter-spacing: 1px;
     }
+
     label {
       display: block;
       margin: 16px 0 6px;
       font-size: 17px;
       font-weight: 600;
     }
+
     input, select {
       width: 100%;
       padding: 12px;
@@ -52,6 +58,7 @@
       margin-bottom: 8px;
       font-size: 16px;
     }
+
     button {
       background-color: #e53935;
       color: white;
@@ -64,9 +71,11 @@
       cursor: pointer;
       margin-top: 15px;
     }
+
     button:hover {
       background-color: #c62828;
     }
+
     .intro-text {
       background-color: rgba(255, 255, 255, 0.15);
       border: 2px solid #ffffff;
@@ -80,18 +89,48 @@
       color: #fff;
       box-shadow: 0 0 10px rgba(255,255,255,0.2);
     }
+
     .justwatch-link {
       text-align: center;
       margin-bottom: 20px;
       font-size: 17px;
     }
+
     .justwatch-link a {
       color: #4fc3f7;
       font-weight: bold;
       text-decoration: none;
     }
+
     .justwatch-link a:hover {
       text-decoration: underline;
+    }
+
+    @media (max-width: 600px) {
+      .form-container {
+        padding: 20px;
+        margin: 10px;
+        background-color: rgba(0, 0, 0, 0.6);
+      }
+
+      .intro-text {
+        font-size: 18px;
+        padding: 16px;
+      }
+
+      h2 {
+        font-size: 22px;
+      }
+
+      input, select {
+        font-size: 15px;
+        padding: 10px;
+      }
+
+      button {
+        font-size: 16px;
+        padding: 12px;
+      }
     }
   </style>
 </head>
@@ -113,7 +152,7 @@
       🔎 <a href="https://www.justwatch.com/br" target="_blank">Verifique a disponibilidade no JustWatch</a>
     </div>
 
-    <form action="https://script.google.com/macros/s/AKfycbzSiXRRpXcVo-qnQ_1ITCQe_xuXvVGGJGvsmr3yKvs1k6_HxCksyx2ud8Glgqf7Edw/exec" method="POST">
+    <form id="pedidoForm">
       <label for="usuario">Nome do Usuário</label>
       <input type="text" id="usuario" name="usuario" required>
 
@@ -141,5 +180,41 @@
       <button type="submit">📨 PEDIR CONTEÚDO</button>
     </form>
   </div>
+
+  <script>
+    const form = document.getElementById('pedidoForm');
+    form.addEventListener('submit', function(e) {
+      e.preventDefault();
+
+      const dados = {
+        usuario: form.usuario.value,
+        numero: form.numero.value,
+        whatsapp: form.whatsapp.value,
+        titulo: form.titulo.value,
+        tipo: form.tipo.value,
+        episodio: form.episodio.value,
+        link: form.link.value
+      };
+
+      fetch('https://script.google.com/macros/s/AKfycbzSiXRRpXcVo-qnQ_1ITCQe_xuXvVGGJGvsmr3yKvs1k6_HxCksyx2ud8Glgqf7Edw/exec', {
+        method: 'POST',
+        body: JSON.stringify(dados),
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      })
+      .then(res => res.json())
+      .then(res => {
+        if (res.status === 'sucesso') {
+          window.location.href = 'sucesso.html'; // redireciona para a página bonita
+        } else {
+          alert('Erro: ' + res.mensagem);
+        }
+      })
+      .catch(() => {
+        alert('Erro ao enviar. Verifique sua conexão e tente novamente.');
+      });
+    });
+  </script>
 </body>
 </html>
