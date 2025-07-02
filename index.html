@@ -2,10 +2,10 @@
 <html lang="pt-br">
 <head>
   <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Mix+ | Pedido de Conteúdo</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600&display=swap" rel="stylesheet">
   <style>
+    @import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700&display=swap');
     body {
       margin: 0;
       padding: 0;
@@ -15,12 +15,12 @@
       color: #fff;
     }
     .form-container {
-      background-color: rgba(0, 0, 0, 0.6);
+      background-color: rgba(0, 0, 0, 0.65);
       max-width: 720px;
       margin: 20px auto;
       padding: 30px 35px;
       border-radius: 20px;
-      box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
+      box-shadow: 0 0 30px rgba(0,0,0,0.8);
     }
     .header-logo {
       text-align: center;
@@ -69,27 +69,41 @@
     }
     .intro-text {
       background-color: rgba(255, 255, 255, 0.12);
-      padding: 18px;
-      border-radius: 14px;
-      font-family: 'Barlow Condensed', sans-serif;
+      border: 2px solid #ffffff;
+      padding: 24px;
+      border-radius: 16px;
       font-size: 20px;
       font-weight: 600;
-      line-height: 1.6;
+      line-height: 1.6em;
+      margin-bottom: 28px;
       text-align: center;
       color: #fff;
-      border: 1px solid #ffffff44;
-      margin-bottom: 25px;
+      box-shadow: 0 0 10px rgba(255,255,255,0.2);
     }
-    .consultar-btn {
-      background-color: #1976d2;
-      margin-top: 10px;
+    .justwatch-link {
+      text-align: center;
+      margin-bottom: 20px;
+      font-size: 17px;
+    }
+    .justwatch-link a {
+      color: #4fc3f7;
+      font-weight: bold;
+      text-decoration: none;
+    }
+    .justwatch-link a:hover {
+      text-decoration: underline;
+    }
+    .consulta-btn {
+      background-color: #4caf50;
+      text-align: center;
+      margin-top: 25px;
     }
   </style>
 </head>
 <body>
   <div class="form-container">
     <div class="header-logo">
-      <img src="https://i.ibb.co/nNByyyd6/logo-mixplus.png" alt="Logo Mix+ IA">
+      <img src="https://i.ibb.co/nNByyyd6/logo-mixplus.png" alt="Logo Mix+">
     </div>
 
     <div class="intro-text">
@@ -100,7 +114,13 @@
 
     <h2>PEDIDO DE CONTEÚDO</h2>
 
+    <div class="justwatch-link">
+      🔎 <a href="https://www.justwatch.com/br" target="_blank">Verificar disponibilidade no JustWatch</a>
+    </div>
+
     <form id="formulario">
+      <input type="hidden" id="datahora" name="datahora">
+
       <label for="usuario">Nome do Usuário</label>
       <input type="text" id="usuario" name="usuario" required>
 
@@ -114,7 +134,7 @@
       <input type="text" id="titulo" name="titulo" required>
 
       <label for="tipo">Tipo</label>
-      <select id="tipo" name="tipo" required>
+      <select id="tipo" name="tipo">
         <option value="série">Série</option>
         <option value="filme">Filme</option>
         <option value="novela">Novela</option>
@@ -131,9 +151,11 @@
       <button type="submit">📨 PEDIR CONTEÚDO</button>
     </form>
 
-    <a href="consulta.html">
-      <button class="consultar-btn">🔎 CONSULTAR ANÁLISE DO PEDIDO</button>
-    </a>
+    <div class="consulta-btn">
+      <a href="consulta.html">
+        <button style="background:#4caf50; margin-top:15px;">🔍 Consultar meus pedidos</button>
+      </a>
+    </div>
   </div>
 
   <script>
@@ -141,36 +163,34 @@
       e.preventDefault();
 
       const dados = {
-        data: new Date().toLocaleString("pt-BR"),
         usuario: document.getElementById("usuario").value,
         numero: document.getElementById("numero").value,
         whatsapp: document.getElementById("whatsapp").value,
         titulo: document.getElementById("titulo").value,
         tipo: document.getElementById("tipo").value,
         episodio: document.getElementById("episodio").value,
-        link: document.getElementById("link").value
+        link: document.getElementById("link").value,
       };
 
-      fetch("https://script.google.com/macros/s/AKfycbyUogrtK7FclDrC6pWfCsCKcBr5wFkZiilbJ5pylS54mvoKP0XzJSXI25jx8R6eRG97/exec", {
+      const form = new FormData();
+      for (const key in dados) {
+        form.append(key, dados[key]);
+      }
+
+      fetch("https://script.google.com/macros/s/AKfycbxHBl9LcMrBR4MFjQXR1H_B6FifMH_EP-0F4Vd0cCtjQ4-gpmLlZ4_WZ7Y8ws1xA_aA/exec", {
         method: "POST",
-        body: JSON.stringify(dados),
-        headers: {
-          "Content-Type": "application/json"
-        }
+        body: form
       })
-      .then(res => res.json())
-      .then(response => {
-        if (response.status === "sucesso") {
-          alert("✅ Pedido enviado com sucesso!");
-          document.getElementById("formulario").reset();
-        } else {
-          alert("❌ Erro ao enviar: " + response.mensagem);
-        }
+      .then(() => {
+        window.location.href = "obrigado.html";
       })
       .catch(error => {
-        alert("❌ Erro na conexão: " + error.message);
+        alert("❌ Erro ao enviar: " + error.message);
       });
     });
+
+    // Preencher automaticamente a data e hora no campo oculto (se usar no futuro)
+    document.getElementById("datahora").value = new Date().toLocaleString("pt-BR");
   </script>
 </body>
 </html>
