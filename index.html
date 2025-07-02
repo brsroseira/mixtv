@@ -156,7 +156,7 @@
         link: document.getElementById("link").value
       };
 
-      fetch("https://script.google.com/macros/s/AKfycbzSiXRRpXcVo-qnQ_1ITCQe_xuXvVGGJGvsmr3yKvs1k6_HxCksyx2ud8Glgqf7Edw/exec", {
+      fetch("https://script.google.com/macros/s/AKfycbzfMbhYFxEmPAnZF3Lg4bc706eEPbz0SB5DgXqMI-C_JyvqXNxXr7K-OKDO4s-yDB0/exec", {
         method: "POST",
         body: JSON.stringify(data),
         headers: {
@@ -167,7 +167,6 @@
       .then(response => {
         if (response.status === "sucesso") {
           document.getElementById("formulario").style.display = "none";
-
           const mensagem = document.createElement("div");
           mensagem.innerHTML = `
             <div style="
