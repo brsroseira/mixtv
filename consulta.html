@@ -12,13 +12,11 @@
       margin: 0;
       padding: 20px;
     }
-
     h1 {
       text-align: center;
       font-size: 32px;
       margin-bottom: 20px;
     }
-
     input {
       display: block;
       margin: 0 auto 20px auto;
@@ -29,23 +27,19 @@
       border: none;
       font-size: 16px;
     }
-
     table {
       width: 100%;
       border-collapse: collapse;
       margin-top: 10px;
     }
-
     th, td {
       padding: 10px;
       text-align: center;
       border-bottom: 1px solid #444;
     }
-
     th {
       background-color: #222;
     }
-
     .status-pendente {
       background-color: #FFD700;
       color: #000;
@@ -53,7 +47,6 @@
       border-radius: 6px;
       font-weight: bold;
     }
-
     .status-feito {
       background-color: #4CAF50;
       color: #fff;
@@ -61,12 +54,10 @@
       border-radius: 6px;
       font-weight: bold;
     }
-
     .voltar {
       text-align: center;
       margin-top: 20px;
     }
-
     .voltar a {
       display: inline-block;
       background-color: #e53935;
@@ -76,7 +67,6 @@
       border-radius: 10px;
       font-weight: bold;
     }
-
     .voltar a:hover {
       background-color: #c62828;
     }
@@ -105,50 +95,73 @@
 
   <script>
     const planilhaURL = "https://opensheet.elk.sh/1nefcaME9BDxso-FLduR3Z24agKl_bUV6He3KkZqZCt0/Sheet1";
+    let todosDados = [];
 
     fetch(planilhaURL)
       .then(res => res.json())
-      .then(dados => {
-        const corpoTabela = document.querySelector("#tabela tbody");
-        dados.reverse().forEach(linha => {
-          const tr = document.createElement("tr");
-
-          const tdData = document.createElement("td");
-          tdData.textContent = new Date(linha.Data).toLocaleString("pt-BR");
-
-          const tdUsuario = document.createElement("td");
-          tdUsuario.textContent = linha.Usuário || linha.usuario;
-
-          const tdTitulo = document.createElement("td");
-          tdTitulo.textContent = linha.Título || linha.titulo;
-
-          const tdTipo = document.createElement("td");
-          tdTipo.textContent = linha.Tipo || linha.tipo;
-
-          const tdStatus = document.createElement("td");
-          const status = (linha.Status || linha.status || "Pendente").trim().toLowerCase();
-          tdStatus.textContent = status.charAt(0).toUpperCase() + status.slice(1);
-          tdStatus.className = status === "feito" ? "status-feito" : "status-pendente";
-
-          tr.appendChild(tdData);
-          tr.appendChild(tdUsuario);
-          tr.appendChild(tdTitulo);
-          tr.appendChild(tdTipo);
-          tr.appendChild(tdStatus);
-
-          corpoTabela.appendChild(tr);
-        });
+      .then(data => {
+        todosDados = data.reverse(); // Mostrar os pedidos mais recentes primeiro
+        // Não mostrar nada até digitar no filtro
       });
 
     document.getElementById("filtro").addEventListener("input", function () {
-      const termo = this.value.toLowerCase();
-      const linhas = document.querySelectorAll("#tabela tbody tr");
+      const termo = this.value.toLowerCase().trim();
 
-      linhas.forEach(tr => {
-        const texto = tr.textContent.toLowerCase();
-        tr.style.display = texto.includes(termo) ? "" : "none";
-      });
+      if (termo === "") {
+        document.querySelector("#tabela tbody").innerHTML = "";
+        return;
+      }
+
+      const filtrado = todosDados.filter(linha =>
+        (linha.Usuário || linha.usuario || "").toLowerCase().includes(termo) ||
+        (linha.Número || linha.numero || "").includes(termo)
+      );
+
+      mostrarTabela(filtrado);
     });
+
+    function mostrarTabela(dados) {
+      const corpoTabela = document.querySelector("#tabela tbody");
+      corpoTabela.innerHTML = "";
+
+      if (dados.length === 0) {
+        corpoTabela.innerHTML = '<tr><td colspan="5">Nenhum pedido encontrado.</td></tr>';
+        return;
+      }
+
+      dados.forEach(linha => {
+        const tr = document.createElement("tr");
+
+        const tdData = document.createElement("td");
+        tdData.textContent = new Intl.DateTimeFormat('pt-BR', {
+          dateStyle: 'short',
+          timeStyle: 'short',
+          timeZone: 'America/Sao_Paulo'
+        }).format(new Date(linha.Data));
+
+        const tdUsuario = document.createElement("td");
+        tdUsuario.textContent = linha.Usuário || linha.usuario || "";
+
+        const tdTitulo = document.createElement("td");
+        tdTitulo.textContent = linha.Título || linha.titulo || "";
+
+        const tdTipo = document.createElement("td");
+        tdTipo.textContent = linha.Tipo || linha.tipo || "";
+
+        const tdStatus = document.createElement("td");
+        const status = (linha.Status || linha.status || "Pendente").trim().toLowerCase();
+        tdStatus.textContent = status.charAt(0).toUpperCase() + status.slice(1);
+        tdStatus.className = status === "feito" ? "status-feito" : "status-pendente";
+
+        tr.appendChild(tdData);
+        tr.appendChild(tdUsuario);
+        tr.appendChild(tdTitulo);
+        tr.appendChild(tdTipo);
+        tr.appendChild(tdStatus);
+
+        corpoTabela.appendChild(tr);
+      });
+    }
   </script>
 </body>
 </html>
