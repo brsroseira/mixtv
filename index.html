@@ -96,11 +96,14 @@
     #retorno {
       margin-top: 20px;
       padding: 15px;
-      background-color: rgba(255,255,255,0.1);
+      background-color: rgba(0, 255, 0, 0.1);
       border-radius: 10px;
       text-align: center;
       font-weight: bold;
       font-size: 18px;
+      display: none;
+      color: #00e676;
+      box-shadow: 0 0 10px rgba(0,255,0,0.2);
     }
   </style>
 </head>
@@ -150,21 +153,24 @@
       <button type="submit">📨 PEDIR CONTEÚDO</button>
     </form>
 
-    <iframe name="iframeRetorno" style="display:none;" onload="mensagemEnviada()"></iframe>
+    <iframe name="iframeRetorno" style="display:none;"></iframe>
 
-    <div id="retorno"></div>
+    <div id="retorno">✅ Pedido enviado com sucesso!</div>
   </div>
 
   <script>
-    function mensagemEnviada() {
-      const form = document.getElementById("formulario");
-      const retorno = document.getElementById("retorno");
+    const form = document.getElementById("formulario");
+    const retorno = document.getElementById("retorno");
 
-      if (form.usuario.value !== "") {
-        retorno.innerText = "✅ Pedido enviado com sucesso!";
+    form.addEventListener("submit", function () {
+      setTimeout(() => {
+        retorno.style.display = "block";
         form.reset();
-      }
-    }
+        setTimeout(() => {
+          retorno.style.display = "none";
+        }, 5000); // esconde após 5 segundos
+      }, 1500); // espera resposta do iframe
+    });
   </script>
 </body>
 </html>
