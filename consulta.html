@@ -2,71 +2,105 @@
 <html lang="pt-br">
 <head>
   <meta charset="UTF-8" />
-  <title>Mix+ | Consulta de Pedido</title>
+  <title>Consulta de Pedidos | Mix+</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600&display=swap" rel="stylesheet">
   <style>
     body {
-      margin: 0;
-      padding: 0;
-      background: #000 url('https://i.ibb.co/Pv38qQC8/ab4a6693-3ad5-4913-be49-b6d41d0bc4c6.png') no-repeat center top fixed;
-      background-size: cover;
+      background-color: #111;
+      color: #fff;
       font-family: 'Barlow Condensed', sans-serif;
-      color: #fff;
+      margin: 0;
+      padding: 20px;
     }
-    .container {
-      max-width: 800px;
-      margin: 40px auto;
-      padding: 30px;
-      background-color: rgba(0,0,0,0.7);
-      border-radius: 20px;
-      box-shadow: 0 0 30px rgba(0,0,0,0.6);
-    }
-    h2 {
+
+    h1 {
       text-align: center;
-      font-size: 28px;
-      margin-bottom: 25px;
-      color: #fff;
-      text-transform: uppercase;
-    }
-    input {
-      width: 100%;
-      padding: 12px;
-      border: none;
-      border-radius: 10px;
+      font-size: 32px;
       margin-bottom: 20px;
+    }
+
+    input {
+      display: block;
+      margin: 0 auto 20px auto;
+      padding: 12px;
+      width: 90%;
+      max-width: 400px;
+      border-radius: 8px;
+      border: none;
       font-size: 16px;
     }
+
     table {
       width: 100%;
       border-collapse: collapse;
-      background-color: #111;
-      border-radius: 10px;
-      overflow: hidden;
+      margin-top: 10px;
     }
+
     th, td {
-      padding: 12px;
-      text-align: left;
-      border-bottom: 1px solid #333;
+      padding: 10px;
+      text-align: center;
+      border-bottom: 1px solid #444;
     }
+
     th {
       background-color: #222;
     }
-    tr:hover {
-      background-color: #333;
+
+    .status-pendente {
+      background-color: #FFD700;
+      color: #000;
+      padding: 6px 10px;
+      border-radius: 6px;
+      font-weight: bold;
     }
-    .no-data {
+
+    .status-feito {
+      background-color: #4CAF50;
+      color: #fff;
+      padding: 6px 10px;
+      border-radius: 6px;
+      font-weight: bold;
+    }
+
+    .voltar {
       text-align: center;
       margin-top: 20px;
-      font-size: 18px;
+    }
+
+    .voltar a {
+      display: inline-block;
+      background-color: #e53935;
+      color: #fff;
+      padding: 10px 20px;
+      text-decoration: none;
+      border-radius: 10px;
+      font-weight: bold;
+    }
+
+    .voltar a:hover {
+      background-color: #c62828;
     }
   </style>
 </head>
 <body>
-  <div class="container">
-    <h2>🔎 Consultar Análise do Pedido</h2>
-    <input type="text" id="filtro" placeholder="Digite seu nome ou número para buscar..." />
-    <div id="tabela-container"></div>
+  <h1>🔍 Consulta de Pedidos</h1>
+  <input type="text" id="filtro" placeholder="Digite seu nome ou número para buscar" />
+
+  <table id="tabela">
+    <thead>
+      <tr>
+        <th>Data</th>
+        <th>Usuário</th>
+        <th>Título</th>
+        <th>Tipo</th>
+        <th>Status</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <div class="voltar">
+    <a href="/mixtv/index.html">⬅️ Voltar</a>
   </div>
 
   <script>
@@ -74,43 +108,46 @@
 
     fetch(planilhaURL)
       .then(res => res.json())
-      .then(data => {
-        window.todosDados = data;
-        mostrarTabela(data);
+      .then(dados => {
+        const corpoTabela = document.querySelector("#tabela tbody");
+        dados.reverse().forEach(linha => {
+          const tr = document.createElement("tr");
+
+          const tdData = document.createElement("td");
+          tdData.textContent = new Date(linha.Data).toLocaleString("pt-BR");
+
+          const tdUsuario = document.createElement("td");
+          tdUsuario.textContent = linha.Usuário;
+
+          const tdTitulo = document.createElement("td");
+          tdTitulo.textContent = linha.Título;
+
+          const tdTipo = document.createElement("td");
+          tdTipo.textContent = linha.Tipo;
+
+          const tdStatus = document.createElement("td");
+          tdStatus.textContent = linha.Status || "Pendente";
+          tdStatus.className = (linha.Status || "").toLowerCase() === "feito" ? "status-feito" : "status-pendente";
+
+          tr.appendChild(tdData);
+          tr.appendChild(tdUsuario);
+          tr.appendChild(tdTitulo);
+          tr.appendChild(tdTipo);
+          tr.appendChild(tdStatus);
+
+          corpoTabela.appendChild(tr);
+        });
       });
 
-    document.getElementById("filtro").addEventListener("input", function() {
+    document.getElementById("filtro").addEventListener("input", function () {
       const termo = this.value.toLowerCase();
-      const filtrado = window.todosDados.filter(row =>
-        row.usuario.toLowerCase().includes(termo) || row.numero.includes(termo)
-      );
-      mostrarTabela(filtrado);
-    });
+      const linhas = document.querySelectorAll("#tabela tbody tr");
 
-    function mostrarTabela(dados) {
-      const container = document.getElementById("tabela-container");
-      if (dados.length === 0) {
-        container.innerHTML = '<p class="no-data">Nenhum pedido encontrado.</p>';
-        return;
-      }
-
-      let html = "<table><tr><th>Data</th><th>Usuário</th><th>Título</th><th>Tipo</th><th>Status</th></tr>";
-      dados.forEach(l => {
-        const status = l.status?.toLowerCase() === "feito"
-          ? '<span style="color: #00e676; font-weight: bold;">Feito</span>'
-          : '<span style="color: #ffeb3b; font-weight: bold;">Pendente</span>';
-
-        html += `<tr>
-          <td>${l.data}</td>
-          <td>${l.usuario}</td>
-          <td>${l.titulo}</td>
-          <td>${l.tipo}</td>
-          <td>${status}</td>
-        </tr>`;
+      linhas.forEach(tr => {
+        const texto = tr.textContent.toLowerCase();
+        tr.style.display = texto.includes(termo) ? "" : "none";
       });
-      html += "</table>";
-      container.innerHTML = html;
-    }
+    });
   </script>
 </body>
 </html>
