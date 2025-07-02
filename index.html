@@ -94,7 +94,7 @@
       text-decoration: underline;
     }
     #retorno {
-      margin-top: 20px;
+      margin: 8px;
       padding: 15px;
       background-color: rgba(0, 255, 0, 0.1);
       border-radius: 10px;
@@ -125,7 +125,7 @@
       🔎 <a href="https://www.justwatch.com/br" target="_blank">Verifique a disponibilidade no JustWatch</a>
     </div>
 
-    <form id="formulario" action="https://script.google.com/macros/s/AKfycbxEZyVS-uX2yxJEUHdrG_2IdVaaSd2w74Thcs36XStqh6zb6t08BUolo0kqMZkd5t-i/exec" method="POST" target="iframeRetorno">
+    <form id="formulario" action="https://script.google.com/macros/s/AKfycbwe5iW7EQhD5iJtNdTA2pj39eA1kxJqwWrE2j9n4c_c226mO35usxgbI_2F8tdkIba2/exec" method="POST" target="iframeRetorno">
       <label for="usuario">Nome do Usuário</label>
       <input type="text" id="usuario" name="usuario" required>
 
@@ -168,8 +168,8 @@
         form.reset();
         setTimeout(() => {
           retorno.style.display = "none";
-        }, 5000); // esconde após 5 segundos
-      }, 1500); // espera resposta do iframe
+        }, 5000); // desaparece após 5 segundos
+      }, 1500); // tempo para resposta do iframe
     });
   </script>
 </body>
