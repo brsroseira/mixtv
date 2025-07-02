@@ -2,179 +2,27 @@
 <html lang="pt-br">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Mix+ | Pedido de Conteúdo</title>
+  <title>Pedido Confirmado</title>
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700&display=swap');
     body {
-      margin: 0;
-      padding: 0;
-      background: #000 url('https://i.ibb.co/Pv38qQC8/ab4a6693-3ad5-4913-be49-b6d41d0bc4c6.png') no-repeat center top fixed;
-      background-size: cover;
+      background-color: #111;
+      color: #fff;
       font-family: 'Barlow Condensed', sans-serif;
-      color: #fff;
-    }
-    .form-container {
-      background-color: rgba(0, 0, 0, 0.85);
-      max-width: 720px;
-      margin: 20px auto;
-      padding: 30px 35px;
-      border-radius: 20px;
-      box-shadow: 0 0 30px rgba(0,0,0,0.8);
-    }
-    .header-logo {
       text-align: center;
-      margin-bottom: 10px;
+      padding: 80px 20px;
     }
-    .header-logo img {
-      width: 220px;
-    }
-    h2 {
-      text-align: center;
-      font-size: 30px;
-      margin-bottom: 25px;
-      color: #ffffff;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 1px;
-    }
-    label {
-      display: block;
-      margin: 16px 0 6px;
-      font-size: 17px;
-      font-weight: 600;
-    }
-    input, select {
-      width: 100%;
-      padding: 12px;
-      border: none;
-      border-radius: 10px;
-      margin-bottom: 8px;
-      font-size: 16px;
-    }
-    button {
-      background-color: #e53935;
-      color: white;
-      padding: 14px;
-      width: 100%;
-      border: none;
-      border-radius: 10px;
-      font-size: 18px;
-      font-weight: bold;
-      cursor: pointer;
-      margin-top: 15px;
-    }
-    button:hover {
-      background-color: #c62828;
-    }
-    .intro-text {
-      background-color: rgba(255, 255, 255, 0.15);
-      border: 2px solid #ffffff;
-      padding: 24px;
-      border-radius: 16px;
-      font-size: 22px;
-      font-weight: 700;
-      line-height: 1.6em;
-      margin-bottom: 28px;
-      text-align: center;
-      color: #fff;
-      box-shadow: 0 0 10px rgba(255,255,255,0.2);
-    }
-    .justwatch-link {
-      text-align: center;
+    h1 {
+      color: #00e676;
+      font-size: 32px;
       margin-bottom: 20px;
-      font-size: 17px;
     }
-    .justwatch-link a {
-      color: #4fc3f7;
-      font-weight: bold;
-      text-decoration: none;
-    }
-    .justwatch-link a:hover {
-      text-decoration: underline;
+    p {
+      font-size: 18px;
     }
   </style>
 </head>
 <body>
-  <div class="form-container">
-    <div class="header-logo">
-      <img src="https://i.ibb.co/nNByyyd6/logo-mixplus.png" alt="Logo Mix+ IA">
-    </div>
-
-    <div class="intro-text">
-      Solicite qualquer conteúdo disponível em plataformas de streaming. <br>
-      Verifique no <strong>JustWatch</strong> se o conteúdo está <strong>disponível para streaming</strong>.<br>
-      Se constar como <em>não disponível</em>, o pedido será descartado.
-    </div>
-
-    <h2>PEDIDO DE CONTEÚDO</h2>
-
-    <div class="justwatch-link">
-      🔎 <a href="https://www.justwatch.com/br" target="_blank">Verifique a disponibilidade no JustWatch</a>
-    </div>
-
-    <form id="formulario">
-      <label for="usuario">Nome do Usuário</label>
-      <input type="text" id="usuario" name="usuario" required>
-
-      <label for="numero">Número do Usuário</label>
-      <input type="text" id="numero" name="numero" required>
-
-      <label for="whatsapp">WhatsApp</label>
-      <input type="tel" id="whatsapp" name="whatsapp" placeholder="(DDD) 9XXXX-XXXX" required>
-
-      <label for="titulo">Título do Pedido</label>
-      <input type="text" id="titulo" name="titulo" required>
-
-      <label for="tipo">Tipo</label>
-      <select id="tipo" name="tipo">
-        <option value="série">Série</option>
-        <option value="filme">Filme</option>
-      </select>
-
-      <label for="episodio">Episódio ou Temporada</label>
-      <input type="text" id="episodio" name="episodio">
-
-      <label for="link">Link do JustWatch</label>
-      <input type="url" id="link" name="link" placeholder="https://www.justwatch.com/br/..." required>
-
-      <button type="submit">📨 PEDIR CONTEÚDO</button>
-    </form>
-  </div>
-
-  <script>
-    document.getElementById("formulario").addEventListener("submit", function(e) {
-      e.preventDefault();
-
-      const data = {
-        usuario: document.getElementById("usuario").value,
-        numero: document.getElementById("numero").value,
-        whatsapp: document.getElementById("whatsapp").value,
-        titulo: document.getElementById("titulo").value,
-        tipo: document.getElementById("tipo").value,
-        episodio: document.getElementById("episodio").value,
-        link: document.getElementById("link").value
-      };
-
-      fetch("https://script.google.com/macros/s/AKfycbzSiXRRpXcVo-qnQ_1ITCQe_xuXvVGGJGvsmr3yKvs1k6_HxCksyx2ud8Glgqf7Edw/exec", {
-        method: "POST",
-        body: JSON.stringify(data),
-        headers: {
-          "Content-Type": "application/json"
-        }
-      })
-      .then(res => res.json())
-      .then(response => {
-        if (response.status === "sucesso") {
-          window.location.href = "sucesso.html";
-        } else {
-          alert("Erro ao enviar: " + response.mensagem);
-        }
-      })
-      .catch(error => {
-        alert("Erro na conexão: " + error);
-      });
-    });
-  </script>
+  <h1>✅ Pedido Enviado com Sucesso!</h1>
+  <p>Obrigado por utilizar o Mix+.<br>Acompanhe seu conteúdo em breve.</p>
 </body>
 </html>
