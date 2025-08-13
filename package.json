@@ -2,9 +2,8 @@
   "name": "talk-home-uploader",
   "version": "1.0.0",
   "type": "module",
-  "engines": {
-    "node": "20.x"
-  },
+  "engines": { "node": "20.x" },
+  "packageManager": "npm@10.8.2",
   "scripts": {
     "postinstall": "npx playwright install --with-deps chromium",
     "start": "node server.js"
