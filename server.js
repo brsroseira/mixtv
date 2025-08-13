@@ -1,53 +1,55 @@
 import express from "express";
-const app = express();
+import axios from "axios";
 
+const app = express();
+app.use(express.json({ limit: "1mb" }));
+
+// ====== CONFIG ======
+const TALK_BASE = process.env.TALK_API_BASE || "https://app-utalk.umbler.com/api";
+const TALK_TOKEN = process.env.TALK_API_TOKEN || "Mix-2025-08-13-2093-08-31--62921E2D9A0FF342106890EEE65177A500E3053FF0566A098178DD368AF642E0";
 const PORT = parseInt(process.env.PORT || "8080", 10);
 
-// ===============================
-// Rota simples para gerar link
-// ===============================
-app.get("/go", (req, res) => {
-  const { m3uUrl, mac } = req.query;
+// ====== FUNÇÕES ======
+function normalizeMac(input) {
+  const hex = (input?.match(/[0-9a-fA-F]/g) || []).join("").toUpperCase();
+  if (hex.length !== 12) return null;
+  return hex.match(/.{1,2}/g).join(":");
+}
 
-  if (!m3uUrl || !mac) {
-    return res.status(400).send("Faltando m3uUrl ou mac");
+async function talkSend({ to, text }) {
+  try {
+    await axios.post(
+      `${TALK_BASE}/v1/messages/simplified`,
+      { to, message: text },
+      { headers: { Authorization: `Bearer ${TALK_TOKEN}`, "Content-Type": "application/json" }, timeout: 15000 }
+    );
+  } catch (e) {
+    console.error("uTalk erro:", e?.response?.data || e.message);
   }
+}
 
-  // Formata o MAC
-  const safeMac = mac.match(/.{1,2}/g)?.join(":").toUpperCase();
-  
-  // Codifica a URL M3U para evitar problemas com caracteres especiais
-  const encodedUrl = encodeURI(m3uUrl);
+// ====== ROTAS ======
+// Recebe: { mac, reply_to }
+app.post("/gerar-link", async (req, res) => {
+  const { mac, reply_to } = req.body || {};
 
-  // HTML simples
-  const html = `
-<!doctype html>
-<html lang="pt-BR">
-<head>
-  <meta charset="utf-8">
-  <title>Enviar lista M3U</title>
-</head>
-<body style="font-family:sans-serif; max-width:600px; margin:20px auto;">
-  <h1>Enviar sua lista M3U</h1>
-  <p>Clique no botão abaixo para enviar sua lista para a TV.</p>
-  <form action="https://iptv-4k.live/pt-br/upload-playlist" method="POST" target="_blank">
-    <input type="hidden" name="url" value="${encodedUrl}">
-    <input type="hidden" name="name" value="${safeMac ? 'Cliente ' + safeMac : 'Cliente IPTV'}">
-    <button type="submit" style="padding:10px 20px; font-size:16px;">📤 Enviar lista</button>
-  </form>
-</body>
-</html>`;
+  const validMac = normalizeMac(mac);
+  if (!validMac) return res.status(400).json({ ok: false, error: "NO_MAC" });
+  if (!reply_to) return res.status(400).json({ ok: false, error: "NO_REPLY_TO" });
 
-  res.setHeader("Content-Type", "text/html; charset=utf-8");
-  res.send(html);
+  // M3U fixo
+  const m3uUrl = `http://aptxu.com/get.php?username=R462rvB7E&password=uw3D6DeJx&type=m3u_plus&output=hls`;
+
+  // Link pronto para abrir no site
+  const finalLink = `https://iptv-4k.live/pt-br/upload-playlist?url=${encodeURIComponent(m3uUrl)}&name=Cliente%20${validMac}`;
+
+  // Responde no WhatsApp
+  await talkSend({ to: reply_to, text: `✅ Seu link para MAC ${validMac}:\n${finalLink}` });
+
+  return res.json({ ok: true, link: finalLink });
 });
 
-// ===============================
-// Healthcheck
-// ===============================
 app.get("/health", (_, res) => res.json({ ok: true }));
 
-// ===============================
-// Inicia servidor
-// ===============================
-app.listen(PORT, () => console.log(`Servidor ON na porta ${PORT}`));
+// ====== START ======
+app.listen(PORT, () => console.log(`Servidor gerador de link ON :${PORT}`));
