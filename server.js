@@ -65,9 +65,30 @@ function normalizeMac(input) {
   return hex.match(/.{1,2}/g).join(":");
 }
 const e164BR = (n) => {
-  const d = String(n || "").replace(/\D/g, "");
-  return d.startsWith("55") ? `+${d}` : `+55${d}`;
+  if (!n) return "";
+  let d = String(n).replace(/\D/g, "");
+
+  // remove código do país se vier (para normalizar)
+  if (d.startsWith("55")) d = d.slice(2);
+
+  // remove zeros à esquerda (ex.: 073…)
+  d = d.replace(/^0+/, "");
+
+  // valida DDD+número (10 ou 11 dígitos)
+  if (d.length < 10 || d.length > 11) {
+    console.error("telefone inválido:", d);
+    return "";
+  }
+  return `+55${d}`;
 };
+
+function makeProvisionalCreds(phoneE164) {
+  const tail = (phoneE164 || "").replace(/\D/g, "").slice(-4)
+            || Math.floor(Math.random() * 1e4).toString().padStart(4, "0");
+  const stamp = Date.now().toString(36).slice(-5);
+  return { username: `tmp${tail}`, password: `p${stamp}${tail}` };
+}
+
 const fill = (tpl, vars) => tpl.replace(/\{(\w+)\}/g, (_, k) => encodeURIComponent(vars[k] ?? ""));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -78,8 +99,7 @@ function buildM3UFromFields({ base = M3U_BASE_DEFAULT, username, password, type 
 }
 function decodeM3U(body) {
   if (body?.m3uUrl)    return String(body.m3uUrl);
-  if (body?.m3uUrl_b64) { try { return Buffer.from(String(body.m3uUrl_b64), "base64").toString("utf8"); } catch {}
-  }
+  if (body?.m3uUrl_b64) { try { return Buffer.from(String(body.m3uUrl_b64), "base64").toString("utf8"); } catch {} }
   if (body?.m3uUrl_enc) { try { return decodeURIComponent(String(body.m3uUrl_enc)); } catch {} }
   for (const k of ["url", "m3u", "playlist"]) {
     if (body?.[k] && /^https?:\/\//i.test(String(body[k]))) return String(body[k]);
@@ -128,15 +148,27 @@ const BROWSER_HEADERS = {
 /* ========= uTalk ========= */
 async function talkSend({ toPhone, message }) {
   if (!TALK_TOKEN) { console.error("talkSend: faltando TALK_API_TOKEN"); return; }
+  const payload = {
+    toPhone: e164BR(toPhone),
+    fromPhone: e164BR(TALK_FROM_PHONE),
+    organizationId: TALK_ORG_ID,
+    message
+  };
   try {
-    await axios.post(
+    const r = await axios.post(
       `${TALK_BASE}/v1/messages/simplified`,
-      { toPhone: e164BR(toPhone), fromPhone: TALK_FROM_PHONE, organizationId: TALK_ORG_ID, message },
-      { headers: { Authorization: `Bearer ${TALK_TOKEN}`, "Content-Type": "application/json" }, timeout: 15000 }
+      payload,
+      { headers: { Authorization: `Bearer ${TALK_TOKEN}`, "Content-Type": "application/json" }, timeout: 15000, validateStatus: () => true }
     );
-    console.log("talkSend OK ->", toPhone);
+    if (r.status >= 200 && r.status < 300) {
+      console.log("talkSend OK ->", payload.toPhone);
+    } else {
+      console.error("uTalk erro:", r.status, typeof r.data === "string" ? r.data : JSON.stringify(r.data));
+      console.error("payload usado:", payload);
+    }
   } catch (e) {
-    console.error("uTalk erro:", e?.response?.data || e.message);
+    console.error("uTalk exceção:", e?.response?.data || e.message);
+    console.error("payload usado:", payload);
   }
 }
 
@@ -280,6 +312,24 @@ async function uploadPlaylistQuick({ mac, url, name, timeoutMs = 10000 }) {
   }
 }
 
+/* ========= NOVO: credenciais provisórias (dentro do fluxo) =========
+ * Entrada: { Conversa:{Id}, Contato:{Numero} }
+ * Saída:   { ok:true, Retorno:{ telefone, username, password, provisorio:true } }
+ */
+app.post("/credenciais", async (req, res) => {
+  try {
+    const numero = req.body?.Contato?.Numero || req.body?.Contato?.Telefone || req.body?.telefone || "";
+    const telefone = e164BR(numero);
+    if (!telefone) return res.status(200).json({ ok: false, reason: "PHONE_INVALID" });
+
+    const { username, password } = makeProvisionalCreds(telefone);
+    return res.json({ ok: true, Retorno: { telefone, username, password, provisorio: true } });
+  } catch (e) {
+    console.error("credenciais error:", e.message);
+    return res.status(200).json({ ok: false, reason: "CREDGEN_ERROR" });
+  }
+});
+
 app.post("/gerar-link-sync", async (req, res) => {
   const body       = normalizeWebhookKeys(req.body || {});
   const macNorm    = normalizeMac(body.mac);
@@ -330,7 +380,18 @@ app.post("/gerar-link-sync", async (req, res) => {
     }
   }
 
-  return res.status(200).json(up.ok ? { ok: true } : { ok: false, reason: "UPLOAD_FAILED" });
+  if (up.ok) {
+    return res.status(200).json({
+      ok: true,
+      Retorno: {
+        telefone: e164BR(reply_to || ""),
+        username,
+        password,
+        provisorio: false
+      }
+    });
+  }
+  return res.status(200).json({ ok: false, reason: "UPLOAD_FAILED" });
 });
 
 /* ========= Endpoints auxiliares ========= */
