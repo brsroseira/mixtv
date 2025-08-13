@@ -243,14 +243,18 @@ async function uploadPlaylist({ mac, url, name }) {
  * Entrada: { mac, usuario, senha, [reply_to], [servidor|app], [type], [output] }
  * Resposta imediata: { ok:true, accepted:true }
  */
-app.post("/gerar-link", async (req, res) => {
+app.post("/gerar-link-sync", async (req, res) => {
   const body = normalizeWebhookKeys(req.body || {});
   const macNorm = normalizeMac(body.mac);
-  const reply_to = body.reply_to; // pode não vir
+  const reply_to = body.reply_to; // <-- pegar o telefone, se vier
 
-  if (!macNorm)  return res.status(400).json({ ok: false, error: "NO_MAC" });
+  if (!macNorm) {
+    // avisa erro, se tiver reply_to
+    if (reply_to) await talkSend({ toPhone: reply_to, message: "❌ MAC ausente ou inválido. Confira nas configurações da TV/app e tente novamente." });
+    return res.status(200).json({ ok: false, reason: "NO_MAC" });
+  }
 
-  const userM3U = (body.username && body.password)
+  const m3u = (body.username && body.password)
     ? buildM3UFromFields({
         username: body.username,
         password: body.password,
@@ -259,32 +263,28 @@ app.post("/gerar-link", async (req, res) => {
       })
     : null;
 
-  if (!userM3U) return res.status(400).json({ ok: false, error: "NO_M3U" });
+  if (!m3u) {
+    if (reply_to) await talkSend({ toPhone: reply_to, message: "❌ Não foi possível gerar a playlist (credenciais). Tente novamente." });
+    return res.status(200).json({ ok: false, reason: "NO_M3U" });
+  }
 
-  res.json({ ok: true, accepted: true });
+  const v = await validateMacQuick(macNorm, 5000);
+  if (v.state === "invalid") {
+    if (reply_to) await talkSend({ toPhone: reply_to, message: "❌ O MAC informado é inválido. Confira nas configurações da TV/app e repita o processo." });
+    return res.status(200).json({ ok: false, reason: "INVALID_MAC" });
+  }
 
-  (async () => {
-    const v = await validateMacDetailed(macNorm);
-    const displayName = (body?.displayName || body?.name || IPTV4K_UPLOAD_NAME_DEFAULT).slice(0, 64);
+  const name = (body?.displayName || body?.servidor || body?.app || IPTV4K_UPLOAD_NAME_DEFAULT).slice(0, 64);
+  const up = await uploadPlaylistQuick({ mac: macNorm, url: m3u, name, timeoutMs: 10000 });
 
-    if (v.state === "invalid") {
-      if (reply_to) await talkSend({ toPhone: reply_to, message: "❌ Não foi possível incluir o serviço. O MAC informado é inválido. Por favor, confira nas configurações da TV/app e repita o processo." });
-      return;
-    }
+  // ✅ notifica sucesso/erro
+  if (reply_to) {
+    if (up.ok) await talkSend({ toPhone: reply_to, message: "✅ Serviço incluído com sucesso. Feche e abra o seu aplicativo." });
+    else       await talkSend({ toPhone: reply_to, message: "⚠️ Não foi possível incluir o serviço agora. Por favor, repita o processo." });
+  }
 
-    if (SAFE_MODE_STRICT && !breakerAllow()) {
-      if (reply_to) await talkSend({ toPhone: reply_to, message: "⚠️ Não foi possível incluir o serviço agora. Por favor, repita o processo." });
-      return;
-    }
-
-    const up = await uploadPlaylist({ mac: macNorm, url: userM3U, name: displayName });
-    breakerReport(up.ok);
-
-    if (reply_to) {
-      if (up.ok) await talkSend({ toPhone: reply_to, message: "✅ Serviço incluido com sucesso, favor fechar e abrir o seu aplicativo." });
-      else       await talkSend({ toPhone: reply_to, message: "⚠️ Não foi possível incluir o serviço agora. Por favor, repita o processo." });
-    }
-  })().catch(err => console.error("bg_task_error:", err?.message));
+  if (up.ok) return res.status(200).json({ ok: true });
+  return res.status(200).json({ ok: false, reason: "UPLOAD_FAILED" });
 });
 
 /* ========= ENDPOINT SÍNCRONO (Worke) =========
