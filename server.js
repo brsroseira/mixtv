@@ -1,46 +1,35 @@
 @@
  app.use(express.json({ limit: "1mb" }));
-
- // ====== ENV (defina no Koyeb) ======
 @@
  const PORT = parseInt(process.env.PORT || "8080", 10);
  // ====================================
-
+ 
 +function decodeM3UFromBody(body) {
-+  // Prioridade: m3uUrl (puro) > m3uUrl_b64 (Base64) > m3uUrl_enc (URL-encoded)
-+  if (body?.m3uUrl) return body.m3uUrl;
++  if (body?.m3uUrl) return body.m3uUrl; // original
 +  if (body?.m3uUrl_b64) {
-+    try {
-+      return Buffer.from(String(body.m3uUrl_b64), "base64").toString("utf8");
-+    } catch { /* ignore */ }
++    try { return Buffer.from(String(body.m3uUrl_b64), "base64").toString("utf8"); } catch {}
 +  }
 +  if (body?.m3uUrl_enc) {
-+    try {
-+      return decodeURIComponent(String(body.m3uUrl_enc));
-+    } catch { /* ignore */ }
++    try { return decodeURIComponent(String(body.m3uUrl_enc)); } catch {}
 +  }
 +  return null;
 +}
 +
 @@
- async function uploadM3U({ mac, m3uUrl, displayName }) {
+-async function uploadM3U({ mac, m3uUrl, displayName }) {
 -  const browser = await chromium.launch({
 -    headless: true,
 -    args: ["--no-sandbox", "--disable-dev-shm-usage"]
 -  });
 -  const page = await browser.newPage();
 -  page.setDefaultTimeout(30000);
++async function uploadM3U({ mac, m3uUrl, displayName }) {
 +  const browser = await chromium.launch({
 +    headless: true,
-+    args: [
-+      "--no-sandbox",
-+      "--disable-dev-shm-usage",
-+      "--disable-blink-features=AutomationControlled"
-+    ]
++    args: ["--no-sandbox","--disable-dev-shm-usage","--disable-blink-features=AutomationControlled"]
 +  });
 +  const context = await browser.newContext({
-+    userAgent:
-+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
++    userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
 +    viewport: { width: 1366, height: 768 }
 +  });
 +  const page = await context.newPage();
@@ -85,14 +74,14 @@
 -    return res.status(502).json({ ok: false, error: result.error || "UPLOAD_FAIL" });
 -  }
 +  console.log("upload_req", { mac: validMac, hasM3U: !!m3uUrl, reply_to });
-+  // responde imediatamente para não estourar timeout do edge
++  // responde já (evita 502/timeout no edge)
 +  res.json({ ok: true, accepted: true });
 +
-+  // processa em background e avisa pelo uTalk
++  // processa em background e avisa no uTalk
 +  (async () => {
 +    const result = await uploadM3U({ mac: validMac, m3uUrl, displayName: `Cliente ${validMac}` });
-+    const msgOk = `✅ Lista enviada para ${validMac}. Verifique na sua TV.`;
-+    const msgFail = `❌ Não foi possível concluir para ${validMac}. Motivo: ${result.error || "UPLOAD_FAIL"}`;
-+    await talkSend({ to: reply_to, text: result.ok ? msgOk : msgFail });
++    const okMsg = `✅ Lista enviada para ${validMac}. Verifique na sua TV.`;
++    const failMsg = `❌ Não foi possível concluir para ${validMac}. Motivo: ${result.error || "UPLOAD_FAIL"}`;
++    await talkSend({ to: reply_to, text: result.ok ? okMsg : failMsg });
 +  })().catch(err => console.error("bg_task_error:", err?.message));
  });
