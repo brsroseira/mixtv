@@ -89,17 +89,31 @@ function decodeM3U(body) {
 }
 function normalizeWebhookKeys(body = {}) {
   const out = { ...body };
-  // credenciais (Worke)
+
+  // credenciais / aliases
   if (!out.username && body.usuario) out.username = body.usuario;
   if (!out.password && (body.senha || body.pass)) out.password = body.senha || body.pass;
+
+  // 🔸 Contato.Usuario = usuário de login
+  if (!out.username && body?.Contato?.Usuario) out.username = String(body.Contato.Usuario);
+
   // MAC possíveis
   out.mac = out.mac || body.mac || body.mac_address || body.endereco_mac || body.device_mac || body.m;
-  // telefone opcional (se vier; para WhatsApp)
+
+  // 🔸 Contato.Numero = celular (reply_to)
   if (!out.reply_to && body.telefone) out.reply_to = body.telefone;
-  // nome exibido no 4K: 'servidor' ou 'app'
+  if (!out.reply_to && body?.Contato?.Numero) out.reply_to = String(body.Contato.Numero);
+
+  // nome exibido no 4K
   if (!out.displayName && body.servidor) out.displayName = String(body.servidor);
   if (!out.displayName && body.app) out.displayName = String(body.app);
+
   return out;
+}
+
+  return res.status(200).json(up.ok ? { ok: true } : { ok: false, reason: "UPLOAD_FAILED" });
+});
+
 }
 
 /* ========= Headers estilo “site” ========= */
@@ -315,29 +329,62 @@ async function uploadPlaylistQuick({ mac, url, name, timeoutMs = 10000 }) {
   }
 }
 app.post("/gerar-link-sync", async (req, res) => {
-  const body = normalizeWebhookKeys(req.body || {});
-  const macNorm = normalizeMac(body.mac);
-  if (!macNorm) return res.status(200).json({ ok: false, reason: "NO_MAC" });
+  const body       = normalizeWebhookKeys(req.body || {});
+  const macNorm    = normalizeMac(body.mac);
+  const reply_to   = body.reply_to;                         // Contato.Numero
+  const username   = body.username || "";                   // Contato.Usuario / usuario
+  const password   = body.password || "";                   // senha/pass (vem do Worker)
+  const name       = (body?.displayName || body?.servidor || body?.app || IPTV4K_UPLOAD_NAME_DEFAULT).slice(0, 64);
 
-  const m3u = (body.username && body.password)
+  const redact = (s) => (s ? String(s).replace(/.(?=.{4})/g, "•") : "");
+
+  if (!macNorm) {
+    if (reply_to) await talkSend({ toPhone: reply_to, message: "❌ MAC ausente ou inválido. Confira na TV/app e tente novamente." });
+    return res.status(200).json({ ok: false, reason: "NO_MAC" });
+  }
+
+  // precisa de credenciais para montar a M3U
+  const m3u = (username && password)
     ? buildM3UFromFields({
-        username: body.username,
-        password: body.password,
-        type: body?.type || M3U_TYPE_DEFAULT,
+        username,
+        password,
+        type: body?.type   || M3U_TYPE_DEFAULT,
         output: body?.output || M3U_OUTPUT_DEFAULT
       })
     : null;
 
-  if (!m3u) return res.status(200).json({ ok: false, reason: "NO_M3U" });
+  if (!m3u) {
+    if (reply_to) await talkSend({ toPhone: reply_to, message: "❌ Não foi possível gerar a playlist (credenciais ausentes). Tente novamente." });
+    return res.status(200).json({ ok: false, reason: "NO_M3U" });
+  }
 
   const v = await validateMacQuick(macNorm, 5000);
-  if (v.state === "invalid") return res.status(200).json({ ok: false, reason: "INVALID_MAC" });
+  if (v.state === "invalid") {
+    if (reply_to) await talkSend({ toPhone: reply_to, message: "❌ O MAC informado é inválido. Confira e repita o processo." });
+    return res.status(200).json({ ok: false, reason: "INVALID_MAC" });
+  }
 
-  const name = (body?.displayName || body?.servidor || body?.app || IPTV4K_UPLOAD_NAME_DEFAULT).slice(0, 64);
+  console.log("uploadQuick ->", { mac: macNorm, name, username, password: redact(password) });
+
   const up = await uploadPlaylistQuick({ mac: macNorm, url: m3u, name, timeoutMs: 10000 });
 
-  if (up.ok) return res.status(200).json({ ok: true });
-  return res.status(200).json({ ok: false, reason: "UPLOAD_FAILED" });
+  // ✅ Confirmação de acesso (fica salva na conversa)
+  if (reply_to) {
+    if (up.ok) {
+      const msg =
+        `✅ *Confirmação de acesso*\n\n` +
+        `📡 *MAC:* ${macNorm}\n` +
+        `💻 *App:* ${name}\n\n` +
+        `🔑 *Usuário:* ${username}\n` +
+        `🔒 *Senha:* ${password}\n\n` +
+        `📲 Feche e abra o aplicativo para atualizar.`;
+      await talkSend({ toPhone: reply_to, message: msg });
+    } else {
+      await talkSend({ toPhone: reply_to, message: "⚠️ Não foi possível incluir o serviço agora. Tente novamente em alguns minutos." });
+    }
+  }
+
+  return res.status(200).json(up.ok ? { ok: true } : { ok: false, reason: "UPLOAD_FAILED" });
 });
 
 /* ========= Utilitários ========= */
