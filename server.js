@@ -12,7 +12,7 @@ app.use(express.json({ limit: "1mb" }));
 // PORT              (Koyeb usa 8080 por padrão)
 const M3U_URL = process.env.M3U_URL || "http://aptxu.com/get.php?username=SHyfAGW7e&password=YzcwfUs3y&type=m3u_plus&output=hls";
 const TALK_BASE = process.env.TALK_API_BASE || "https://app-utalk.umbler.com/api";
-const TALK_TOKEN = process.env.TALK_API_TOKEN || "SEU_TOKEN_UMBLER";
+const TALK_TOKEN = process.env.TALK_API_TOKEN || "Mix-2025-08-13-2093-08-31--62921E2D9A0FF342106890EEE65177A500E3053FF0566A098178DD368AF642E0";
 const PORT = parseInt(process.env.PORT || "8080", 10);
 // ====================================
 
@@ -91,12 +91,14 @@ async function uploadM3U({ mac, m3uUrl, displayName }) {
 
 // Recebe do Worker: { mac, reply_to }
 app.post("/upload", async (req, res) => {
-  const { mac, reply_to } = req.body || {};
+  const { mac, m3uUrl, reply_to } = req.body || {};
+
   const validMac = normalizeMac(mac);
   if (!validMac) return res.status(400).json({ ok: false, error: "NO_MAC" });
+  if (!m3uUrl) return res.status(400).json({ ok: false, error: "NO_M3U" });
   if (!reply_to) return res.status(400).json({ ok: false, error: "NO_REPLY_TO" });
 
-  const result = await uploadM3U({ mac: validMac, m3uUrl: M3U_URL, displayName: `Cliente ${validMac}` });
+  const result = await uploadM3U({ mac: validMac, m3uUrl, displayName: `Cliente ${validMac}` });
 
   if (result.ok) {
     await talkSend({ to: reply_to, text: `✅ Lista enviada para ${validMac}. Verifique na sua TV.` });
