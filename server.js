@@ -92,11 +92,24 @@ function normalizeWebhookKeys(body = {}) {
   // credenciais (Worke)
   if (!out.username && body.usuario) out.username = body.usuario;
   if (!out.password && (body.senha || body.pass)) out.password = body.senha || body.pass;
+
   // MAC possíveis
   out.mac = out.mac || body.mac || body.mac_address || body.endereco_mac || body.device_mac || body.m;
+
   // telefone opcional (se vier; para WhatsApp)
   if (!out.reply_to && body.telefone) out.reply_to = body.telefone;
-  // nome exibido no 4K: 'servidor' ou 'app'
+
+  // 👇 NOVO: aceitar chatId vindo de várias chaves
+  out.chatId = out.chatId
+    || body.chatId
+    || body?.Conversa?.Id
+    || body?.Chat?.Id
+    || body?.Payload?.Chat?.Id
+    || body?.Contato?.ChatID
+    || body?.contato?.ChatID
+    || body?.chat_id;
+
+  // nome exibido no 4K
   if (!out.displayName && body.servidor) out.displayName = String(body.servidor);
   if (!out.displayName && body.app) out.displayName = String(body.app);
   return out;
@@ -114,17 +127,48 @@ const BROWSER_HEADERS = {
 };
 
 /* ========= uTalk ========= */
-async function talkSend({ toPhone, message }) {
+async function talkSend({ toPhone, chatId, message }) {
   if (!TALK_TOKEN) { console.error("talkSend: faltando TALK_API_TOKEN"); return; }
+
+  // payload base
+  const base = {
+    organizationId: TALK_ORG_ID,
+    fromPhone: TALK_FROM_PHONE,
+    message
+  };
+
+  // 1) tenta chatId primeiro (se houver)
+  if (chatId) {
+    try {
+      await axios.post(
+        `${TALK_BASE}/v1/messages/simplified`,
+        { ...base, chatId }, // 👈 alguns ambientes aceitam chatId aqui
+        { headers: { Authorization: `Bearer ${TALK_TOKEN}`, "Content-Type": "application/json" }, timeout: 15000, validateStatus: () => true }
+      ).then(r => {
+        if (r.status >= 200 && r.status < 300) {
+          console.log("talkSend OK via chatId ->", chatId);
+        } else {
+          throw new Error(`chatId send failed: ${r.status} ${(typeof r.data === "string" ? r.data : JSON.stringify(r.data||{})).slice(0,200)}`);
+        }
+      });
+      return;
+    } catch (e) {
+      console.warn("talkSend(chatId) falhou:", e.message);
+      // cai para número se disponível
+    }
+  }
+
+  // 2) fallback por número (documentado oficialmente)
+  if (!toPhone) { console.warn("talkSend: sem chatId e sem toPhone — nada a enviar"); return; }
   try {
     await axios.post(
       `${TALK_BASE}/v1/messages/simplified`,
-      { toPhone: e164BR(toPhone), fromPhone: TALK_FROM_PHONE, organizationId: TALK_ORG_ID, message },
+      { ...base, toPhone: e164BR(toPhone) },
       { headers: { Authorization: `Bearer ${TALK_TOKEN}`, "Content-Type": "application/json" }, timeout: 15000 }
     );
-    console.log("talkSend OK ->", toPhone);
+    console.log("talkSend OK via toPhone ->", toPhone);
   } catch (e) {
-    console.error("uTalk erro:", e?.response?.data || e.message);
+    console.error("uTalk erro (toPhone):", e?.response?.data || e.message);
   }
 }
 
@@ -314,37 +358,61 @@ async function uploadPlaylistQuick({ mac, url, name, timeoutMs = 10000 }) {
     return { ok: false, status: 0, body: e.message };
   }
 }
-app.post("/gerar-link-sync", async (req, res) => {
+app.post("/gerar-link", async (req, res) => {
   const body = normalizeWebhookKeys(req.body || {});
   const macNorm = normalizeMac(body.mac);
-  if (!macNorm) return res.status(200).json({ ok: false, reason: "NO_MAC" });
 
-  const m3u = (body.username && body.password)
-    ? buildM3UFromFields({
-        username: body.username,
-        password: body.password,
-        type: body?.type || M3U_TYPE_DEFAULT,
-        output: body?.output || M3U_OUTPUT_DEFAULT
-      })
+  // 👇 agora temos os dois
+  const reply_to_phone = body.reply_to; // número, se vier
+  const reply_to_chat  = body.chatId;   // chatId, se vier
+
+  if (!macNorm)  return res.status(400).json({ ok: false, error: "NO_MAC" });
+
+  const userM3U = (body.username && body.password)
+    ? buildM3UFromFields({ username: body.username, password: body.password, type: body?.type || M3U_TYPE_DEFAULT, output: body?.output || M3U_OUTPUT_DEFAULT })
     : null;
 
-  if (!m3u) return res.status(200).json({ ok: false, reason: "NO_M3U" });
+  if (!userM3U) return res.status(400).json({ ok: false, error: "NO_M3U" });
 
-  const v = await validateMacQuick(macNorm, 5000);
-  if (v.state === "invalid") return res.status(200).json({ ok: false, reason: "INVALID_MAC" });
+  res.json({ ok: true, accepted: true });
 
-  const name = (body?.displayName || body?.servidor || body?.app || IPTV4K_UPLOAD_NAME_DEFAULT).slice(0, 64);
-  const up = await uploadPlaylistQuick({ mac: macNorm, url: m3u, name, timeoutMs: 10000 });
+  (async () => {
+    const v = await validateMacDetailed(macNorm);
+    const displayName = (body?.displayName || body?.name || IPTV4K_UPLOAD_NAME_DEFAULT).slice(0, 64);
 
-  if (up.ok) return res.status(200).json({ ok: true });
-  return res.status(200).json({ ok: false, reason: "UPLOAD_FAILED" });
+    if (v.state === "invalid") {
+      if (reply_to_phone || reply_to_chat) {
+        await talkSend({ toPhone: reply_to_phone, chatId: reply_to_chat,
+          message: "❌ Não foi possível incluir o serviço. O MAC informado é inválido. Por favor, confira nas configurações da TV/app e repita o processo." });
+      }
+      return;
+    }
+
+    if (SAFE_MODE_STRICT && !breakerAllow()) {
+      if (reply_to_phone || reply_to_chat) {
+        await talkSend({ toPhone: reply_to_phone, chatId: reply_to_chat,
+          message: "⚠️ Não foi possível incluir o serviço agora. Por favor, repita o processo." });
+      }
+      return;
+    }
+
+    const up = await uploadPlaylist({ mac: macNorm, url: userM3U, name: displayName });
+    breakerReport(up.ok);
+
+    if (reply_to_phone || reply_to_chat) {
+      if (up.ok) await talkSend({ toPhone: reply_to_phone, chatId: reply_to_chat,
+         message: "✅ Serviço incluído com sucesso, feche e abra o aplicativo." });
+      else       await talkSend({ toPhone: reply_to_phone, chatId: reply_to_chat,
+         message: "⚠️ Não foi possível incluir o serviço agora. Por favor, repita o processo." });
+    }
+  })().catch(err => console.error("bg_task_error:", err?.message));
 });
 
 /* ========= Utilitários ========= */
 app.post("/_talk", async (req, res) => {
   try {
     const msg = req.body.message || "✅ Teste de envio (server)";
-    await talkSend({ toPhone: req.body.to, message: msg });
+    await talkSend({ toPhone: req.body.to, chatId: req.body.chatId, message: msg });
     res.json({ ok: true });
   } catch { res.status(500).json({ ok: false }); }
 });
