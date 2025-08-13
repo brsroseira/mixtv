@@ -10,7 +10,7 @@ app.use(express.json({ limit: "1mb" }));
 // TALK_API_TOKEN = SEU_TOKEN_UMBLER
 // (PORT é injetada pelo Koyeb; usamos fallback 8080)
 const TALK_BASE  = process.env.TALK_API_BASE  || "https://app-utalk.umbler.com/api";
-const TALK_TOKEN = process.env.TALK_API_TOKEN || "Mix-2025-08-13-2093-08-31--62921E2D9A0FF342106890EEE65177A500E3053FF0566A098178DD368AF642E0";
+const TALK_TOKEN = process.env.TALK_API_TOKEN;
 const PORT = parseInt(process.env.PORT || "8080", 10);
 // ==========================
 
