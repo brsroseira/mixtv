@@ -5,9 +5,9 @@ const app = express();
 app.use(express.json({ limit: "1mb" }));
 app.use(express.urlencoded({ extended: true })); // aceita x-www-form-urlencoded
 
-/* ========= uTalk ========= */
+/* ========= uTalk (opcional; só se vier reply_to) ========= */
 const TALK_BASE = process.env.TALK_API_BASE || "https://app-utalk.umbler.com/api";
-const TALK_TOKEN = process.env.TALK_API_TOKEN || "";                 // necessário p/ WhatsApp
+const TALK_TOKEN = process.env.TALK_API_TOKEN || "";                 // defina se quiser WhatsApp
 const TALK_ORG_ID = process.env.TALK_ORG_ID || "aF3zZgwcLc4qDRuo";
 const TALK_FROM_PHONE = process.env.TALK_FROM_PHONE || "+5573981731354";
 
@@ -65,30 +65,9 @@ function normalizeMac(input) {
   return hex.match(/.{1,2}/g).join(":");
 }
 const e164BR = (n) => {
-  if (!n) return "";
-  let d = String(n).replace(/\D/g, "");
-
-  // remove código do país se vier (para normalizar)
-  if (d.startsWith("55")) d = d.slice(2);
-
-  // remove zeros à esquerda (ex.: 073…)
-  d = d.replace(/^0+/, "");
-
-  // valida DDD+número (10 ou 11 dígitos)
-  if (d.length < 10 || d.length > 11) {
-    console.error("telefone inválido:", d);
-    return "";
-  }
-  return `+55${d}`;
+  const d = String(n || "").replace(/\D/g, "");
+  return d.startsWith("55") ? `+${d}` : `+55${d}`;
 };
-
-function makeProvisionalCreds(phoneE164) {
-  const tail = (phoneE164 || "").replace(/\D/g, "").slice(-4)
-            || Math.floor(Math.random() * 1e4).toString().padStart(4, "0");
-  const stamp = Date.now().toString(36).slice(-5);
-  return { username: `tmp${tail}`, password: `p${stamp}${tail}` };
-}
-
 const fill = (tpl, vars) => tpl.replace(/\{(\w+)\}/g, (_, k) => encodeURIComponent(vars[k] ?? ""));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -110,27 +89,16 @@ function decodeM3U(body) {
 }
 function normalizeWebhookKeys(body = {}) {
   const out = { ...body };
-
-  // login (Contato.Usuario > usuario)
-  if (!out.username && body?.Contato?.Usuario) out.username = String(body.Contato.Usuario);
+  // credenciais (Worke)
   if (!out.username && body.usuario) out.username = body.usuario;
-
-  // senha (Contato.Senha > senha/pass)
-  if (!out.password && body?.Contato?.Senha) out.password = String(body.Contato.Senha);
   if (!out.password && (body.senha || body.pass)) out.password = body.senha || body.pass;
-
-  // MAC
+  // MAC possíveis
   out.mac = out.mac || body.mac || body.mac_address || body.endereco_mac || body.device_mac || body.m;
-
-  // telefone (reply_to) — Contato.Telefone/Numero > telefone
-  if (!out.reply_to && body?.Contato?.Telefone) out.reply_to = String(body.Contato.Telefone);
-  if (!out.reply_to && body?.Contato?.Numero)   out.reply_to = String(body.Contato.Numero);
-  if (!out.reply_to && body.telefone)           out.reply_to = body.telefone;
-
-  // nome exibido no 4K
+  // telefone opcional (se vier; para WhatsApp)
+  if (!out.reply_to && body.telefone) out.reply_to = body.telefone;
+  // nome exibido no 4K: 'servidor' ou 'app'
   if (!out.displayName && body.servidor) out.displayName = String(body.servidor);
-  if (!out.displayName && body.app)      out.displayName = String(body.app);
-
+  if (!out.displayName && body.app) out.displayName = String(body.app);
   return out;
 }
 
@@ -148,27 +116,15 @@ const BROWSER_HEADERS = {
 /* ========= uTalk ========= */
 async function talkSend({ toPhone, message }) {
   if (!TALK_TOKEN) { console.error("talkSend: faltando TALK_API_TOKEN"); return; }
-  const payload = {
-    toPhone: e164BR(toPhone),
-    fromPhone: e164BR(TALK_FROM_PHONE),
-    organizationId: TALK_ORG_ID,
-    message
-  };
   try {
-    const r = await axios.post(
+    await axios.post(
       `${TALK_BASE}/v1/messages/simplified`,
-      payload,
-      { headers: { Authorization: `Bearer ${TALK_TOKEN}`, "Content-Type": "application/json" }, timeout: 15000, validateStatus: () => true }
+      { toPhone: e164BR(toPhone), fromPhone: TALK_FROM_PHONE, organizationId: TALK_ORG_ID, message },
+      { headers: { Authorization: `Bearer ${TALK_TOKEN}`, "Content-Type": "application/json" }, timeout: 15000 }
     );
-    if (r.status >= 200 && r.status < 300) {
-      console.log("talkSend OK ->", payload.toPhone);
-    } else {
-      console.error("uTalk erro:", r.status, typeof r.data === "string" ? r.data : JSON.stringify(r.data));
-      console.error("payload usado:", payload);
-    }
+    console.log("talkSend OK ->", toPhone);
   } catch (e) {
-    console.error("uTalk exceção:", e?.response?.data || e.message);
-    console.error("payload usado:", payload);
+    console.error("uTalk erro:", e?.response?.data || e.message);
   }
 }
 
@@ -283,10 +239,57 @@ async function uploadPlaylist({ mac, url, name }) {
   return last;
 }
 
-/* ========= ENDPOINT SÍNCRONO (Worker) =========
- * Entrada: { mac, usuario|username, senha|password, telefone|Contato.Telefone, [servidor|app], [type], [output] }
+/* ========= ENDPOINT ASSÍNCRONO (opcional WhatsApp) =========
+ * Entrada: { mac, usuario, senha, [reply_to], [servidor|app], [type], [output] }
+ * Resposta imediata: { ok:true, accepted:true }
+ */
+app.post("/gerar-link", async (req, res) => {
+  const body = normalizeWebhookKeys(req.body || {});
+  const macNorm = normalizeMac(body.mac);
+  const reply_to = body.reply_to; // pode não vir
+
+  if (!macNorm)  return res.status(400).json({ ok: false, error: "NO_MAC" });
+
+  const userM3U = (body.username && body.password)
+    ? buildM3UFromFields({
+        username: body.username,
+        password: body.password,
+        type: body?.type || M3U_TYPE_DEFAULT,
+        output: body?.output || M3U_OUTPUT_DEFAULT
+      })
+    : null;
+
+  if (!userM3U) return res.status(400).json({ ok: false, error: "NO_M3U" });
+
+  res.json({ ok: true, accepted: true });
+
+  (async () => {
+    const v = await validateMacDetailed(macNorm);
+    const displayName = (body?.displayName || body?.name || IPTV4K_UPLOAD_NAME_DEFAULT).slice(0, 64);
+
+    if (v.state === "invalid") {
+      if (reply_to) await talkSend({ toPhone: reply_to, message: "❌ Não foi possível incluir o serviço. O MAC informado é inválido. Por favor, confira nas configurações da TV/app e repita o processo." });
+      return;
+    }
+
+    if (SAFE_MODE_STRICT && !breakerAllow()) {
+      if (reply_to) await talkSend({ toPhone: reply_to, message: "⚠️ Não foi possível incluir o serviço agora. Por favor, repita o processo." });
+      return;
+    }
+
+    const up = await uploadPlaylist({ mac: macNorm, url: userM3U, name: displayName });
+    breakerReport(up.ok);
+
+    if (reply_to) {
+      if (up.ok) await talkSend({ toPhone: reply_to, message: "✅ Serviço incluido com sucesso, favor fechar e abrir o seu aplicativo." });
+      else       await talkSend({ toPhone: reply_to, message: "⚠️ Não foi possível incluir o serviço agora. Por favor, repita o processo." });
+    }
+  })().catch(err => console.error("bg_task_error:", err?.message));
+});
+
+/* ========= ENDPOINT SÍNCRONO (Worke) =========
+ * Entrada: { mac, usuario, senha, [servidor|app], [type], [output] }
  * Resposta: { ok:true } | { ok:false, reason }
- * Notifica WhatsApp com ícones e salva no histórico.
  */
 async function validateMacQuick(mac17, timeoutMs = 5000) {
   const url = fill(IPTV4K_VALIDATE_URL_TEMPLATE, { mac: mac17 });
@@ -311,90 +314,33 @@ async function uploadPlaylistQuick({ mac, url, name, timeoutMs = 10000 }) {
     return { ok: false, status: 0, body: e.message };
   }
 }
-
-/* ========= NOVO: credenciais provisórias (dentro do fluxo) =========
- * Entrada: { Conversa:{Id}, Contato:{Numero} }
- * Saída:   { ok:true, Retorno:{ telefone, username, password, provisorio:true } }
- */
-app.post("/credenciais", async (req, res) => {
-  try {
-    const numero = req.body?.Contato?.Numero || req.body?.Contato?.Telefone || req.body?.telefone || "";
-    const telefone = e164BR(numero);
-    if (!telefone) return res.status(200).json({ ok: false, reason: "PHONE_INVALID" });
-
-    const { username, password } = makeProvisionalCreds(telefone);
-    return res.json({ ok: true, Retorno: { telefone, username, password, provisorio: true } });
-  } catch (e) {
-    console.error("credenciais error:", e.message);
-    return res.status(200).json({ ok: false, reason: "CREDGEN_ERROR" });
-  }
-});
-
 app.post("/gerar-link-sync", async (req, res) => {
-  const body       = normalizeWebhookKeys(req.body || {});
-  const macNorm    = normalizeMac(body.mac);
-  const reply_to   = body.reply_to; // Contato.Telefone/Numero ou telefone
-  const username   = body.username || ""; // Contato.Usuario > usuario
-  const password   = body.password || ""; // Contato.Senha   > senha/pass
-  const name       = (body?.displayName || body?.servidor || body?.app || IPTV4K_UPLOAD_NAME_DEFAULT).slice(0, 64);
+  const body = normalizeWebhookKeys(req.body || {});
+  const macNorm = normalizeMac(body.mac);
+  if (!macNorm) return res.status(200).json({ ok: false, reason: "NO_MAC" });
 
-  const redact = (s) => (s ? String(s).replace(/.(?=.{4})/g, "•") : "");
-
-  if (!macNorm) {
-    if (reply_to) await talkSend({ toPhone: reply_to, message: "❌ MAC ausente ou inválido. Confira na TV/app e tente novamente." });
-    return res.status(200).json({ ok: false, reason: "NO_MAC" });
-  }
-
-  const m3u = (username && password)
-    ? buildM3UFromFields({ username, password, type: body?.type || M3U_TYPE_DEFAULT, output: body?.output || M3U_OUTPUT_DEFAULT })
+  const m3u = (body.username && body.password)
+    ? buildM3UFromFields({
+        username: body.username,
+        password: body.password,
+        type: body?.type || M3U_TYPE_DEFAULT,
+        output: body?.output || M3U_OUTPUT_DEFAULT
+      })
     : null;
 
-  if (!m3u) {
-    if (reply_to) await talkSend({ toPhone: reply_to, message: "❌ Não foi possível gerar a playlist (credenciais ausentes). Tente novamente." });
-    return res.status(200).json({ ok: false, reason: "NO_M3U" });
-  }
+  if (!m3u) return res.status(200).json({ ok: false, reason: "NO_M3U" });
 
   const v = await validateMacQuick(macNorm, 5000);
-  if (v.state === "invalid") {
-    if (reply_to) await talkSend({ toPhone: reply_to, message: "❌ O MAC informado é inválido. Confira e repita o processo." });
-    return res.status(200).json({ ok: false, reason: "INVALID_MAC" });
-  }
+  if (v.state === "invalid") return res.status(200).json({ ok: false, reason: "INVALID_MAC" });
 
-  console.log("uploadQuick ->", { mac: macNorm, name, username, password: redact(password) });
-
+  const name = (body?.displayName || body?.servidor || body?.app || IPTV4K_UPLOAD_NAME_DEFAULT).slice(0, 64);
   const up = await uploadPlaylistQuick({ mac: macNorm, url: m3u, name, timeoutMs: 10000 });
 
-  // ✅ Confirmação com ícones (fica salva no histórico da conversa via uTalk)
-  if (reply_to) {
-    if (up.ok) {
-      const msg =
-        `✅ *Confirmação de acesso*\n\n` +
-        `📡 *MAC:* ${macNorm}\n` +
-        `💻 *App:* ${name}\n\n` +
-        `🔑 *Usuário:* ${username}\n` +
-        `🔒 *Senha:* ${password}\n\n` +
-        `📲 Feche e abra o aplicativo para atualizar.`;
-      await talkSend({ toPhone: reply_to, message: msg });
-    } else {
-      await talkSend({ toPhone: reply_to, message: "⚠️ Não foi possível incluir o serviço agora. Tente novamente em alguns minutos." });
-    }
-  }
-
-  if (up.ok) {
-    return res.status(200).json({
-      ok: true,
-      Retorno: {
-        telefone: e164BR(reply_to || ""),
-        username,
-        password,
-        provisorio: false
-      }
-    });
-  }
+  if (up.ok) return res.status(200).json({ ok: true });
   return res.status(200).json({ ok: false, reason: "UPLOAD_FAILED" });
 });
 
-/* ========= Endpoints auxiliares ========= */
+/* ========= Utilitários ========= */
 app.post("/_talk", async (req, res) => {
   try {
     const msg = req.body.message || "✅ Teste de envio (server)";
@@ -402,15 +348,37 @@ app.post("/_talk", async (req, res) => {
     res.json({ ok: true });
   } catch { res.status(500).json({ ok: false }); }
 });
+
+app.post("/_probe", async (req, res) => {
+  const body = normalizeWebhookKeys(req.body || {});
+  const macNorm = normalizeMac(body.mac || "");
+  const m3u = (body?.username && body?.password)
+    ? buildM3UFromFields({ username: body.username, password: body.password, type: body?.type || M3U_TYPE_DEFAULT, output: body?.output || M3U_OUTPUT_DEFAULT })
+    : (decodeM3U(body) || body.url);
+  const name = (body?.displayName || body?.servidor || body?.app || IPTV4K_UPLOAD_NAME_DEFAULT).slice(0, 64);
+
+  if (!macNorm || !m3u) return res.status(400).json({ ok: false, error: "need mac + m3u/url" });
+
+  const v = await validateMacDetailed(macNorm);
+  const up = await uploadPlaylist({ mac: macNorm, url: m3u, name });
+
+  res.json({
+    ok: true,
+    mac: macNorm,
+    validate: { state: v.state, status: v.status, snippet: String(v.snippet || "").slice(0, 400) },
+    upload:   { ok: up.ok, status: up.status, snippet: String(typeof up.raw === "string" ? up.raw : JSON.stringify(up.raw || {})).slice(0, 400) }
+  });
+});
+
 app.get("/_healthz", (_, res) => res.json({ ok: true }));
 app.get("/_readyz",  (_, res) => {
   const missing = [];
   if (!TALK_ORG_ID) missing.push("TALK_ORG_ID");
   if (!TALK_FROM_PHONE) missing.push("TALK_FROM_PHONE");
-  if (!TALK_TOKEN) missing.push("TALK_API_TOKEN (necessário para enviar WhatsApp)");
+  if (!TALK_TOKEN) missing.push("TALK_API_TOKEN (apenas necessário para enviar WhatsApp)");
   res.json({ ok: missing.length === 0, missing });
 });
-app.get("/health",  (_, res) => res.json({ ok: true }));
+app.get("/health", (_, res) => res.json({ ok: true }));
 
 /* ========= Start ========= */
 app.listen(PORT, () => console.log(`ON :${PORT}`));
