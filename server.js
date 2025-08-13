@@ -19,8 +19,9 @@ const IPTV4K_UPLOAD_URL_TEMPLATE =
   process.env.IPTV4K_UPLOAD_URL_TEMPLATE ||
   "https://api.iptv-4k.live/api/playlist_with_mac?mac={mac}&url={url}&name={name}";
 
-const IPTV4K_UPLOAD_METHOD = (process.env.IPTV4K_UPLOAD_METHOD || "GET").toUpperCase(); // GET|POST
-const IPTV4K_UPLOAD_BODY_STYLE = (process.env.IPTV4K_UPLOAD_BODY_STYLE || "query").toLowerCase(); // query|json|form
+// Por padrão agora usamos POST + form (GET deu 404 "Cannot GET /api/playlist_with_mac")
+const IPTV4K_UPLOAD_METHOD = (process.env.IPTV4K_UPLOAD_METHOD || "POST").toUpperCase(); // GET|POST
+const IPTV4K_UPLOAD_BODY_STYLE = (process.env.IPTV4K_UPLOAD_BODY_STYLE || "form").toLowerCase(); // query|json|form
 
 const PORT = parseInt(process.env.PORT || "8080", 10);
 
@@ -50,7 +51,7 @@ function decodeM3U(body) {
 }
 
 function buildM3UFromFields({
-  base = "http://line.iptv-4k.live/get.php", // default alinhado aos testes
+  base = "http://line.iptv-4k.live/get.php", // alinhado aos testes
   username, password, type = "m3u_plus", output = "hls"
 }) {
   if (!username || !password) return null;
@@ -95,25 +96,40 @@ async function talkSend({ toPhone, message }) {
 }
 
 /* ========= 4K IPTV: validação ========= */
-/** Trata 404 como inválido; 500 com "mac length 17" também como inválido. */
+/** Trata 404 e 500 "mac length 17" como inválido; reconhece {error:false, message:{mac/id}} como válido. */
 function decideValidateState(status, data) {
   if (status === 404) return "invalid";
+
   const txt = typeof data === "string" ? data : JSON.stringify(data || "");
   if (status === 500 && /"mac"\s*length\s*must\s*be\s*17/i.test(txt)) return "invalid";
+
   if (status >= 200 && status < 300) {
     if (/<!doctype|<html/i.test(txt)) return "unknown"; // HTML/WAF
+
+    // Formato típico do 4K: { error:false, message:{ ...mac/id... }, status:200 }
+    if (data && data.error === false && (data?.message?.mac || data?.message?.id)) return "valid";
+
+    // Sinais genéricos de "válido"
     const yes =
       data === true || data === 1 ||
       data?.valid === true || data?.ok === true || data?.exists === true || data?.success === true ||
       String(data?.status || "").toLowerCase() === "valid" ||
       String(data?.result || "").toLowerCase() === "valid" ||
       /\b(ok|true|válido|valido|success)\b/i.test(txt);
+
+    if (yes) return "valid";
+
+    // Sinais genéricos de "inválido"
     const no =
       data === false || data === 0 ||
       data?.valid === false || data?.ok === false || data?.exists === false || data?.success === false ||
       /\b(invalid|inválid|nao\s*encontrado|não\s*encontrado|not\s*found)\b/i.test(txt);
-    return yes ? "valid" : (no ? "invalid" : "unknown");
+
+    if (no) return "invalid";
+
+    return "unknown";
   }
+
   return "unknown";
 }
 
@@ -121,9 +137,13 @@ async function validateMacDetailed(mac17) {
   const url = fill(IPTV4K_VALIDATE_URL_TEMPLATE, { mac: mac17 });
   try {
     const r = await axios.get(url, { headers: BROWSER_HEADERS, timeout: 8000, validateStatus: () => true });
-    const snippet = String(r.data ?? "").slice(0, 600);
+    const snippet = typeof r.data === "string" ? r.data : JSON.stringify(r.data);
     const state = decideValidateState(r.status, r.data);
-    console.log("validateMac:", mac17, "->", state, "status:", r.status, "snippet:", snippet.replace(/\s+/g, " ").slice(0, 200));
+    console.log(
+      "validateMac:", mac17, "->", state,
+      "status:", r.status,
+      "snippet:", snippet.replace(/\s+/g, " ").slice(0, 200)
+    );
     return { state, status: r.status, snippet };
   } catch (e) {
     console.log("validateMac error:", mac17, e.message);
@@ -139,13 +159,17 @@ async function validateMac(mac17) {
 /* ========= 4K IPTV: envio ========= */
 function looksOk(body) {
   const txt = typeof body === "string" ? body : JSON.stringify(body || "");
-  return body === true || body?.ok === true || body?.success === true ||
+  return body === true ||
+         body?.ok === true ||
+         body?.success === true ||
+         body?.error === false ||                    // importante para respostas do 4K
          String(body?.status || "").toLowerCase() === "ok" ||
          /\b(ok|success|enviad[oa]|atualizad[oa]|uploaded|created|update\s*ok)\b/i.test(txt);
 }
 
 function shouldRetry(status, errMsg) {
   if (status >= 500 && status < 600) return true;
+  if (status === 429) return true;
   if (!status) { // timeout / abort / DNS / network
     if (/ECONNABORTED|timeout|Network Error|socket hang up/i.test(errMsg || "")) return true;
   }
@@ -157,37 +181,48 @@ async function uploadOnce({ method, url, name, mac, encUrl }) {
     const target = fill(IPTV4K_UPLOAD_URL_TEMPLATE, { mac, url: encUrl, name });
     const r = await axios.get(target, { headers: BROWSER_HEADERS, timeout: 12000, validateStatus: () => true });
     const ok = (r.status >= 200 && r.status < 300 && looksOk(r.data));
-    console.log("upload GET:", r.status, ok, String(r.data).slice(0, 200));
+    console.log("upload GET:", r.status, ok, (typeof r.data === "string" ? r.data : JSON.stringify(r.data)).slice(0, 200));
     return { ok, status: r.status, raw: r.data, headers: r.headers };
   } else {
     let postUrl = IPTV4K_UPLOAD_URL_TEMPLATE;
     let body; const headers = { ...BROWSER_HEADERS };
     if (IPTV4K_UPLOAD_BODY_STYLE === "json") {
-      body = { mac, url: decodeURIComponent(encUrl), name };
+      body = { mac, url, name }; // JSON usa URL crua
       headers["Content-Type"] = "application/json";
     } else if (IPTV4K_UPLOAD_BODY_STYLE === "form") {
-      body = new URLSearchParams({ mac, url: decodeURIComponent(encUrl), name }).toString();
+      body = new URLSearchParams({ mac, url, name }).toString(); // form encoda por padrão
       headers["Content-Type"] = "application/x-www-form-urlencoded";
     } else {
-      postUrl = fill(IPTV4K_UPLOAD_URL_TEMPLATE, { mac, url: encUrl, name }); // query
+      postUrl = fill(IPTV4K_UPLOAD_URL_TEMPLATE, { mac, url: encUrl, name }); // query string
     }
     const r = await axios.post(postUrl, body, { headers, timeout: 12000, validateStatus: () => true });
     const ok = (r.status >= 200 && r.status < 300 && looksOk(r.data));
-    console.log("upload POST:", r.status, ok, String(r.data).slice(0, 200));
+    console.log("upload POST:", r.status, ok, (typeof r.data === "string" ? r.data : JSON.stringify(r.data)).slice(0, 200));
     return { ok, status: r.status, raw: r.data, headers: r.headers };
   }
 }
 
 async function uploadPlaylist({ mac, url, name }) {
   const encUrl = encodeURIComponent(url);
-  // tentativa primária
   try {
+    // tentativa primária (respeita METHOD/BODY_STYLE)
     const r1 = await uploadOnce({ method: IPTV4K_UPLOAD_METHOD, url, name, mac, encUrl });
     if (r1.ok) return r1;
-    // retries apenas em 5xx/timeout
-    const retryable = shouldRetry(r1.status, "");
-    if (!retryable) {
-      // fallback automático: POST form
+
+    // retries apenas em 5xx/429/timeout
+    if (shouldRetry(r1.status, "")) {
+      let last = r1;
+      for (let i = 1; i <= 2; i++) {
+        await sleep(500 * i); // backoff simples
+        try {
+          const ri = await uploadOnce({ method: IPTV4K_UPLOAD_METHOD, url, name, mac, encUrl });
+          if (ri.ok) return ri;
+          last = ri;
+        } catch (e) {
+          last = { ok: false, status: 0, raw: e.message };
+        }
+      }
+      // fallback após retries: POST form
       try {
         const rfb = await axios.post(
           IPTV4K_UPLOAD_URL_TEMPLATE,
@@ -195,28 +230,15 @@ async function uploadPlaylist({ mac, url, name }) {
           { headers: { ...BROWSER_HEADERS, "Content-Type": "application/x-www-form-urlencoded" }, timeout: 12000, validateStatus: () => true }
         );
         const ok = (rfb.status >= 200 && rfb.status < 300 && looksOk(rfb.data));
-        console.log("upload fallback POST-form:", rfb.status, ok, String(rfb.data).slice(0, 200));
+        console.log("upload fallback POST-form:", rfb.status, ok, (typeof rfb.data === "string" ? rfb.data : JSON.stringify(rfb.data)).slice(0, 200));
         if (ok) return { ok, status: rfb.status, raw: rfb.data, headers: rfb.headers };
       } catch (e) {
         console.log("upload fallback error:", e.message);
       }
-      return { ok: false, status: r1.status, raw: r1.raw };
+      return { ok: false, status: last.status, raw: last.raw };
     }
 
-    // retries com backoff (1–2 tentativas)
-    let last = r1;
-    for (let i = 1; i <= 2; i++) {
-      await sleep(500 * i); // backoff linear simples
-      try {
-        const ri = await uploadOnce({ method: IPTV4K_UPLOAD_METHOD, url, name, mac, encUrl });
-        if (ri.ok) return ri;
-        last = ri;
-      } catch (e) {
-        last = { ok: false, status: 0, raw: e.message };
-      }
-    }
-
-    // fallback após retries
+    // sem retry: tenta fallback direto (POST form)
     try {
       const rfb = await axios.post(
         IPTV4K_UPLOAD_URL_TEMPLATE,
@@ -224,13 +246,13 @@ async function uploadPlaylist({ mac, url, name }) {
         { headers: { ...BROWSER_HEADERS, "Content-Type": "application/x-www-form-urlencoded" }, timeout: 12000, validateStatus: () => true }
       );
       const ok = (rfb.status >= 200 && rfb.status < 300 && looksOk(rfb.data));
-      console.log("upload fallback POST-form (after retries):", rfb.status, ok, String(rfb.data).slice(0, 200));
+      console.log("upload fallback POST-form (no-retry):", rfb.status, ok, (typeof rfb.data === "string" ? rfb.data : JSON.stringify(rfb.data)).slice(0, 200));
       if (ok) return { ok, status: rfb.status, raw: rfb.data, headers: rfb.headers };
     } catch (e) {
-      console.log("upload fallback after retries error:", e.message);
+      console.log("upload fallback no-retry error:", e.message);
     }
 
-    return { ok: false, status: last.status, raw: last.raw };
+    return { ok: false, status: r1.status, raw: r1.raw };
   } catch (e) {
     console.log("upload primary error:", e.message);
     return { ok: false, status: 0, raw: e.message };
@@ -263,10 +285,10 @@ app.post("/gerar-link", async (req, res) => {
   });
   if (!userM3U) return res.status(400).json({ ok: false, error: "NO_M3U" });
 
-  // responde já (evita timeout 502)
+  // resposta imediata (evita timeout 502)
   res.json({ ok: true, accepted: true });
 
-  // processa em background
+  // processamento assíncrono
   (async () => {
     // 1) valida MAC (sempre no formato 17 chars com ':')
     const v = await validateMacDetailed(macNorm);
@@ -318,7 +340,7 @@ app.post("/_probe", async (req, res) => {
     ok: true,
     mac: macNorm,
     validate: { state: v.state, status: v.status, snippet: String(v.snippet || "").slice(0, 400) },
-    upload:   { ok: up.ok, status: up.status, snippet: String(up.raw || "").slice(0, 400) }
+    upload:   { ok: up.ok, status: up.status, snippet: String(typeof up.raw === "string" ? up.raw : JSON.stringify(up.raw || {})).slice(0, 400) }
   });
 });
 
