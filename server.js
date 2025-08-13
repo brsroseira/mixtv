@@ -1,19 +1,35 @@
 @@
--import express from "express";
--import axios from "axios";
--import { chromium } from "@playwright/test";
-+import express from "express";
-+import axios from "axios";
-+import { chromium } from "@playwright/test";
+ app.use(express.json({ limit: "1mb" }));
+
+ // ====== ENV (defina no Koyeb) ======
 @@
--async function uploadM3U({ mac, m3uUrl, displayName }) {
+ const PORT = parseInt(process.env.PORT || "8080", 10);
+ // ====================================
+
++function decodeM3UFromBody(body) {
++  // Prioridade: m3uUrl (puro) > m3uUrl_b64 (Base64) > m3uUrl_enc (URL-encoded)
++  if (body?.m3uUrl) return body.m3uUrl;
++  if (body?.m3uUrl_b64) {
++    try {
++      return Buffer.from(String(body.m3uUrl_b64), "base64").toString("utf8");
++    } catch { /* ignore */ }
++  }
++  if (body?.m3uUrl_enc) {
++    try {
++      return decodeURIComponent(String(body.m3uUrl_enc));
++    } catch { /* ignore */ }
++  }
++  return null;
++}
++
+@@
+ async function uploadM3U({ mac, m3uUrl, displayName }) {
 -  const browser = await chromium.launch({
 -    headless: true,
 -    args: ["--no-sandbox", "--disable-dev-shm-usage"]
 -  });
 -  const page = await browser.newPage();
 -  page.setDefaultTimeout(30000);
-+async function uploadM3U({ mac, m3uUrl, displayName }) {
 +  const browser = await chromium.launch({
 +    headless: true,
 +    args: [
@@ -34,14 +50,7 @@
 +    await page.goto("https://iptv-4k.live/pt-br/upload-playlist", { waitUntil: "load", timeout: 60000 });
 +    await page.waitForLoadState("networkidle", { timeout: 60000 }).catch(() => {});
 @@
--    const sendBtn = page.getByRole("button", { name: /Enviar|Upload|Salvar/i });
--    await sendBtn.click();
-+    const sendBtn = page.getByRole("button", { name: /Enviar|Upload|Salvar/i });
-+    await sendBtn.click({ trial: false });
- 
--    // Espera curto por feedback
 -    await page.waitForTimeout(2500);
-+    // Espera por feedback/alertas
 +    await page.waitForTimeout(3000);
 @@
 -  } catch (e) {
@@ -57,12 +66,15 @@
  // Recebe do Worker: { mac, reply_to }
 -app.post("/upload", async (req, res) => {
 -  const { mac, m3uUrl, reply_to } = req.body || {};
--
--  const validMac = normalizeMac(mac);
--  if (!validMac) return res.status(400).json({ ok: false, error: "NO_MAC" });
--  if (!m3uUrl) return res.status(400).json({ ok: false, error: "NO_M3U" });
--  if (!reply_to) return res.status(400).json({ ok: false, error: "NO_REPLY_TO" });
--
++app.post("/upload", async (req, res) => {
++  const { mac, reply_to } = req.body || {};
++  const m3uUrl = decodeM3UFromBody(req.body);
+ 
+   const validMac = normalizeMac(mac);
+   if (!validMac) return res.status(400).json({ ok: false, error: "NO_MAC" });
+   if (!m3uUrl) return res.status(400).json({ ok: false, error: "NO_M3U" });
+   if (!reply_to) return res.status(400).json({ ok: false, error: "NO_REPLY_TO" });
+ 
 -  const result = await uploadM3U({ mac: validMac, m3uUrl, displayName: `Cliente ${validMac}` });
 -
 -  if (result.ok) {
@@ -72,27 +84,15 @@
 -    await talkSend({ to: reply_to, text: `❌ Não foi possível concluir para ${validMac}. Tente novamente.` });
 -    return res.status(502).json({ ok: false, error: result.error || "UPLOAD_FAIL" });
 -  }
--});
-+app.post("/upload", async (req, res) => {
-+  const { mac, m3uUrl, reply_to } = req.body || {};
-+
-+  const validMac = normalizeMac(mac);
-+  if (!validMac) return res.status(400).json({ ok: false, error: "NO_MAC" });
-+  if (!m3uUrl) return res.status(400).json({ ok: false, error: "NO_M3U" });
-+  if (!reply_to) return res.status(400).json({ ok: false, error: "NO_REPLY_TO" });
-+
 +  console.log("upload_req", { mac: validMac, hasM3U: !!m3uUrl, reply_to });
-+
-+  // 🔸 responde já para não estourar o timeout do edge
++  // responde imediatamente para não estourar timeout do edge
 +  res.json({ ok: true, accepted: true });
 +
-+  // 🔸 processa em background e avisa no uTalk
++  // processa em background e avisa pelo uTalk
 +  (async () => {
 +    const result = await uploadM3U({ mac: validMac, m3uUrl, displayName: `Cliente ${validMac}` });
-+    if (result.ok) {
-+      await talkSend({ to: reply_to, text: `✅ Lista enviada para ${validMac}. Verifique na sua TV.` });
-+    } else {
-+      await talkSend({ to: reply_to, text: `❌ Não foi possível concluir para ${validMac}. Motivo: ${result.error || "UPLOAD_FAIL"}` });
-+    }
++    const msgOk = `✅ Lista enviada para ${validMac}. Verifique na sua TV.`;
++    const msgFail = `❌ Não foi possível concluir para ${validMac}. Motivo: ${result.error || "UPLOAD_FAIL"}`;
++    await talkSend({ to: reply_to, text: result.ok ? msgOk : msgFail });
 +  })().catch(err => console.error("bg_task_error:", err?.message));
-+});
+ });
