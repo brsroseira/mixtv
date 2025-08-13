@@ -7,8 +7,8 @@ app.use(express.json({ limit: "1mb" }));
 /* ========= uTalk (envs obrigatórias) ========= */
 const TALK_BASE = process.env.TALK_API_BASE || "https://app-utalk.umbler.com/api";
 const TALK_TOKEN = process.env.TALK_API_TOKEN;                       // defina no Koyeb
-const TALK_ORG_ID = process.env.TALK_ORG_ID || "aF3zZgwcLc4qDRuo";   // seu orgId
-const TALK_FROM_PHONE = process.env.TALK_FROM_PHONE || "+5573981731354"; // seu remetente E.164 (+55...)
+const TALK_ORG_ID = process.env.TALK_ORG_ID || "aF3zZgwcLc4qDRuo";   // org id
+const TALK_FROM_PHONE = process.env.TALK_FROM_PHONE || "+5573981731354"; // remetente E.164 (+55...)
 
 /* ========= IPTV-4K (configuráveis por env) ========= */
 // Validação
@@ -36,6 +36,7 @@ const e164BR = n => {
   return d.startsWith("55") ? `+${d}` : `+55${d}`;
 };
 const fill = (tpl, vars) => tpl.replace(/\{(\w+)\}/g, (_, k) => encodeURIComponent(vars[k] ?? ""));
+
 function decodeM3U(body) {
   if (body?.m3uUrl) return String(body.m3uUrl);
   if (body?.m3uUrl_b64) {
@@ -76,20 +77,32 @@ async function talkSend({ toPhone, message }) {
 }
 
 /* ========= 4K IPTV APIs ========= */
+// retorna "valid" | "invalid" | "unknown"
 async function validateMac(mac) {
   const url = fill(IPTV4K_VALIDATE_URL_TEMPLATE, { mac });
   try {
     const resp = await axios.get(url, { timeout: 8000, validateStatus: () => true });
     const d = resp.data;
-    const ok =
-      d === true || d?.valid === true || d?.ok === true || d?.exists === true ||
-      d?.success === true || String(d?.status || "").toLowerCase() === "valid" ||
-      d?.result === "valid";
-    console.log("validateMac:", mac, "status:", resp.status, "ok:", !!ok, "raw:", JSON.stringify(d).slice(0, 160));
-    return !!ok;
+
+    const yes =
+      d === true || d === 1 ||
+      d?.valid === true || d?.ok === true || d?.exists === true || d?.success === true ||
+      d?.valid === 1   || d?.ok === 1   || d?.exists === 1   || d?.success === 1   ||
+      String(d?.status || "").toLowerCase() === "valid" ||
+      String(d?.result || "").toLowerCase() === "valid";
+
+    const no =
+      d === false || d === 0 ||
+      d?.valid === false || d?.ok === false || d?.exists === false || d?.success === false ||
+      d?.valid === 0   || d?.ok === 0   || d?.exists === 0   || d?.success === 0 ||
+      /invalid|not\s*found|nao\s*encontrado|não\s*encontrado/i.test(JSON.stringify(d) || "");
+
+    const state = yes ? "valid" : (no ? "invalid" : "unknown");
+    console.log("validateMac:", mac, "status:", resp.status, "state:", state, "raw:", JSON.stringify(d).slice(0, 160));
+    return state;
   } catch (e) {
     console.error("validateMac error:", e.message);
-    return false;
+    return "unknown";
   }
 }
 
@@ -106,7 +119,7 @@ async function uploadPlaylist({ mac, url, name }) {
     }
 
     // POST
-    let postUrl = IPTV4K_UPLOAD_URL_TEMPLATE; // use o template base
+    let postUrl = IPTV4K_UPLOAD_URL_TEMPLATE; // base
     let body = undefined;
     let headers = {};
     if (IPTV4K_UPLOAD_BODY_STYLE === "json") {
@@ -117,7 +130,7 @@ async function uploadPlaylist({ mac, url, name }) {
       body = params.toString();
       headers["Content-Type"] = "application/x-www-form-urlencoded";
     } else {
-      // "query" → já está tudo em {target}; envia sem body
+      // "query" → já está tudo em {target}
       postUrl = target;
     }
 
@@ -137,7 +150,6 @@ async function uploadPlaylist({ mac, url, name }) {
  * Body aceito:
  * {
  *   mac, reply_to,
- *   // uma das opções abaixo para a lista:
  *   m3uUrl | m3uUrl_b64 | m3uUrl_enc
  *   // ou:
  *   username, password, [base, type, output]
@@ -150,7 +162,6 @@ app.post("/gerar-link", async (req, res) => {
   if (!macNorm) return res.status(400).json({ ok: false, error: "NO_MAC" });
   if (!reply_to) return res.status(400).json({ ok: false, error: "NO_REPLY_TO" });
 
-  // monta M3U do usuário
   const userM3U = decodeM3U(req.body) || buildM3UFromFields({
     base: req.body?.base,
     username: req.body?.username,
@@ -160,28 +171,29 @@ app.post("/gerar-link", async (req, res) => {
   });
   if (!userM3U) return res.status(400).json({ ok: false, error: "NO_M3U" });
 
-  // responde já para não estourar timeout no edge
+  // responde já para não estourar timeout
   res.json({ ok: true, accepted: true });
 
   // processa em background
   (async () => {
-    // 1) valida MAC na API
-    const okMac = await validateMac(macNorm);
-    if (!okMac) {
-      await talkSend({ toPhone: reply_to, message: `❌ MAC *${macNorm}* inválido no sistema. Verifique e envie novamente.` });
-      return;
-    }
+    // 1) validação (pode retornar "invalid"/"unknown")
+    const macState = await validateMac(macNorm);
 
-    // 2) tenta envio automático
+    // 2) tenta envio automático MESMO se a validação não confirmar
     const up = await uploadPlaylist({ mac: macNorm, url: userM3U, name: `Cliente ${macNorm}` });
+
     if (up.ok) {
-      await talkSend({ toPhone: reply_to, message: `✅ MAC *${macNorm}* validado e lista enviada com sucesso. Abra a TV e verifique.` });
+      const prefix = (macState === "valid")
+        ? "✅ MAC validado e lista enviada."
+        : "✅ Lista enviada (validação prévia não confirmou, mas o envio foi aceito).";
+      await talkSend({ toPhone: reply_to, message: `${prefix}\nAbra a TV e verifique.` });
     } else {
       const manual = `https://iptv-4k.live/pt-br/upload-playlist?url=${encodeURIComponent(userM3U)}&name=Cliente%20${encodeURIComponent(macNorm)}`;
-      await talkSend({
-        toPhone: reply_to,
-        message: `⚠️ MAC *${macNorm}* válido, mas a API de envio não confirmou.\nTente manualmente por aqui:\n${manual}`
-      });
+      const motivo =
+        macState === "invalid" ? "inválido no 4K" :
+        macState === "unknown" ? "validação inconclusiva" :
+        "API de envio não confirmou";
+      await talkSend({ toPhone: reply_to, message: `⚠️ MAC *${macNorm}* ${motivo}.\nTente manualmente:\n${manual}` });
     }
   })().catch(err => console.error("bg_task_error:", err?.message));
 });
