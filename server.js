@@ -290,17 +290,13 @@ async function uploadPlaylist({ mac, url, name }) {
 app.post("/gerar-link", async (req, res) => {
   const body = normalizeWebhookKeys(req.body || {});
   const macNorm = normalizeMac(body.mac);
-  const reply_to = body.reply_to; // pode não vir
+  const reply_to_chat  = body.chatId;   // ✅ chatId do payload
+  const reply_to_phone = body.reply_to; // número (opcional)
 
   if (!macNorm)  return res.status(400).json({ ok: false, error: "NO_MAC" });
 
   const userM3U = (body.username && body.password)
-    ? buildM3UFromFields({
-        username: body.username,
-        password: body.password,
-        type: body?.type || M3U_TYPE_DEFAULT,
-        output: body?.output || M3U_OUTPUT_DEFAULT
-      })
+    ? buildM3UFromFields({ username: body.username, password: body.password, type: body?.type || M3U_TYPE_DEFAULT, output: body?.output || M3U_OUTPUT_DEFAULT })
     : null;
 
   if (!userM3U) return res.status(400).json({ ok: false, error: "NO_M3U" });
@@ -312,21 +308,23 @@ app.post("/gerar-link", async (req, res) => {
     const displayName = (body?.displayName || body?.name || IPTV4K_UPLOAD_NAME_DEFAULT).slice(0, 64);
 
     if (v.state === "invalid") {
-      if (reply_to) await talkSend({ toPhone: reply_to, message: "❌ Não foi possível incluir o serviço. O MAC informado é inválido. Por favor, confira nas configurações da TV/app e repita o processo." });
+      if (reply_to_chat || reply_to_phone)
+        await talkSend({ chatId: reply_to_chat, toPhone: reply_to_phone, message: "❌ MAC inválido. Confira na TV/app e repita o processo." });
       return;
     }
 
     if (SAFE_MODE_STRICT && !breakerAllow()) {
-      if (reply_to) await talkSend({ toPhone: reply_to, message: "⚠️ Não foi possível incluir o serviço agora. Por favor, repita o processo." });
+      if (reply_to_chat || reply_to_phone)
+        await talkSend({ chatId: reply_to_chat, toPhone: reply_to_phone, message: "⚠️ Não foi possível incluir o serviço agora. Tente novamente." });
       return;
     }
 
     const up = await uploadPlaylist({ mac: macNorm, url: userM3U, name: displayName });
     breakerReport(up.ok);
 
-    if (reply_to) {
-      if (up.ok) await talkSend({ toPhone: reply_to, message: "✅ Serviço incluido com sucesso, favor fechar e abrir o seu aplicativo." });
-      else       await talkSend({ toPhone: reply_to, message: "⚠️ Não foi possível incluir o serviço agora. Por favor, repita o processo." });
+    if (reply_to_chat || reply_to_phone) {
+      if (up.ok) await talkSend({ chatId: reply_to_chat, toPhone: reply_to_phone, message: "✅ Serviço incluído com sucesso. Feche e abra o app." });
+      else       await talkSend({ chatId: reply_to_chat, toPhone: reply_to_phone, message: "⚠️ Falha ao incluir o serviço. Tente novamente." });
     }
   })().catch(err => console.error("bg_task_error:", err?.message));
 });
@@ -412,7 +410,7 @@ app.post("/gerar-link", async (req, res) => {
 app.post("/_talk", async (req, res) => {
   try {
     const msg = req.body.message || "✅ Teste de envio (server)";
-    await talkSend({ toPhone: req.body.to, chatId: req.body.chatId, message: msg });
+    await talkSend({ chatId: req.body.chatId, toPhone: req.body.to, message: msg });
     res.json({ ok: true });
   } catch { res.status(500).json({ ok: false }); }
 });
