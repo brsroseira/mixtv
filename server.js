@@ -6,11 +6,9 @@ const app = express();
 app.use(express.json({ limit: "1mb" }));
 
 // ====== ENV (defina no Koyeb) ======
-// M3U_URL           ex.: http://aptxu.com/get.php?username=...&password=...&type=m3u_plus&output=hls
 // TALK_API_BASE     ex.: https://app-utalk.umbler.com/api
 // TALK_API_TOKEN    ex.: seu_token_umblur
 // PORT              (Koyeb usa 8080 por padrão)
-const M3U_URL = process.env.M3U_URL || "http://aptxu.com/get.php?username=SHyfAGW7e&password=YzcwfUs3y&type=m3u_plus&output=hls";
 const TALK_BASE = process.env.TALK_API_BASE || "https://app-utalk.umbler.com/api";
 const TALK_TOKEN = process.env.TALK_API_TOKEN || "Mix-2025-08-13-2093-08-31--62921E2D9A0FF342106890EEE65177A500E3053FF0566A098178DD368AF642E0";
 const PORT = parseInt(process.env.PORT || "8080", 10);
