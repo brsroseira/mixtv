@@ -1,0 +1,14 @@
+{
+  "name": "talk-home-uploader",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "postinstall": "npx playwright install --with-deps chromium",
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@playwright/test": "^1.46.0",
+    "axios": "^1.7.2",
+    "express": "^4.19.2"
+  }
+}
