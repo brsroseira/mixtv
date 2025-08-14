@@ -7,9 +7,12 @@ app.use(express.urlencoded({ extended: true })); // aceita x-www-form-urlencoded
 
 /* ========= uTalk (opcional; só se vier reply_to) ========= */
 const TALK_BASE = process.env.TALK_API_BASE || "https://app-utalk.umbler.com/api";
-const TALK_TOKEN = process.env.TALK_API_TOKEN || "Bearer mix-2025-08-14-2093-09-01--741B6EA4A6E61EED9F4C21E10CD2B8811E2A050F14533130FD2E8C0B672A979";                 // defina se quiser WhatsApp
+// 👉 Deixe o env **sem** "Bearer " (apenas o token cru)
+const TALK_TOKEN = process.env.TALK_API_TOKEN || "mix-2025-08-14-2093-09-01--741B6EA4A6E61EED9F4C21E10CD2B8811E2A050F14533130FD2E8C0B672A979";
 const TALK_ORG_ID = process.env.TALK_ORG_ID || "aF3zZgwcLc4qDRuo";
 const TALK_FROM_PHONE = process.env.TALK_FROM_PHONE || "+5573981731354";
+const authHeader = () =>
+  (TALK_TOKEN || "").startsWith("Bearer ") ? TALK_TOKEN : `Bearer ${TALK_TOKEN}`;
 
 /* ========= IPTV-4K (env/config) ========= */
 const IPTV4K_VALIDATE_URL_TEMPLATE =
@@ -78,7 +81,8 @@ function buildM3UFromFields({ base = M3U_BASE_DEFAULT, username, password, type 
 }
 function decodeM3U(body) {
   if (body?.m3uUrl)    return String(body.m3uUrl);
-  if (body?.m3uUrl_b64) { try { return Buffer.from(String(body.m3uUrl_b64), "base64").toString("utf8"); } catch {} }
+  if (body?.m3uUrl_b64) { try { return Buffer.from(String(body.m3uUrl_b64), "base64").toString("utf8"); } catch {}
+  }
   if (body?.m3uUrl_enc) { try { return decodeURIComponent(String(body.m3uUrl_enc)); } catch {} }
   for (const k of ["url", "m3u", "playlist"]) {
     if (body?.[k] && /^https?:\/\//i.test(String(body[k]))) return String(body[k]);
@@ -99,7 +103,7 @@ function normalizeWebhookKeys(body = {}) {
   // telefone opcional (se vier; para WhatsApp)
   if (!out.reply_to && body.telefone) out.reply_to = body.telefone;
 
-  // 👇 NOVO: aceitar chatId vindo de várias chaves
+  // aceitar chatId vindo de várias chaves
   out.chatId = out.chatId
     || body.chatId
     || body?.Conversa?.Id
@@ -117,58 +121,53 @@ function normalizeWebhookKeys(body = {}) {
 
 /* ========= Headers estilo “site” ========= */
 const BROWSER_HEADERS = {
-  "accept": "application/json",
+  accept: "application/json",
   "accept-language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7,gl;q=0.6",
   "cache-control": "no-cache",
-  "origin": "https://iptv-4k.live",
-  "pragma": "no-cache",
-  "referer": "https://iptv-4k.live/",
+  origin: "https://iptv-4k.live",
+  pragma: "no-cache",
+  referer: "https://iptv-4k.live/",
   "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36"
 };
 
-/* ========= uTalk ========= */
-async function talkSend({ toPhone, chatId, message }) {
+/* ========= uTalk =========
+   Prioridade: IDs > chatId > phone
+*/
+async function talkSend({ toContactId, fromChannelId, chatId, toPhone, message }) {
   if (!TALK_TOKEN) { console.error("talkSend: faltando TALK_API_TOKEN"); return; }
 
-  // payload base
-  const base = {
-    organizationId: TALK_ORG_ID,
-    fromPhone: TALK_FROM_PHONE,
-    message
-  };
+  const base = { organizationId: TALK_ORG_ID, message };
 
-  // 1) tenta chatId primeiro (se houver)
-  if (chatId) {
-    try {
-      await axios.post(
-        `${TALK_BASE}/v1/messages/simplified`,
-        { ...base, chatId }, // 👈 alguns ambientes aceitam chatId aqui
-        { headers: { Authorization: `Bearer ${TALK_TOKEN}`, "Content-Type": "application/json" }, timeout: 15000, validateStatus: () => true }
-      ).then(r => {
-        if (r.status >= 200 && r.status < 300) {
-          console.log("talkSend OK via chatId ->", chatId);
-        } else {
-          throw new Error(`chatId send failed: ${r.status} ${(typeof r.data === "string" ? r.data : JSON.stringify(r.data||{})).slice(0,200)}`);
-        }
-      });
-      return;
-    } catch (e) {
-      console.warn("talkSend(chatId) falhou:", e.message);
-      // cai para número se disponível
-    }
+  // monta body conforme prioridade
+  let body = null;
+  if (toContactId || fromChannelId) {
+    body = { ...base };
+    if (toContactId) body.toContactId = toContactId;
+    if (fromChannelId) body.fromChannelId = fromChannelId;
+  } else if (chatId) {
+    body = { ...base, chatId };
+  } else if (toPhone) {
+    body = { ...base, toPhone: e164BR(toPhone), fromPhone: TALK_FROM_PHONE };
   }
 
-  // 2) fallback por número (documentado oficialmente)
-  if (!toPhone) { console.warn("talkSend: sem chatId e sem toPhone — nada a enviar"); return; }
+  if (!body) { console.warn("talkSend: sem destino (id/chat/phone)"); return; }
+
   try {
-    await axios.post(
+    const r = await axios.post(
       `${TALK_BASE}/v1/messages/simplified`,
-      { ...base, toPhone: e164BR(toPhone) },
-      { headers: { Authorization: `Bearer ${TALK_TOKEN}`, "Content-Type": "application/json" }, timeout: 15000 }
+      body,
+      { headers: { Authorization: authHeader(), "Content-Type": "application/json" }, timeout: 15000, validateStatus: () => true }
     );
-    console.log("talkSend OK via toPhone ->", toPhone);
+    if (r.status >= 200 && r.status < 300) {
+      console.log("talkSend OK ->", r.status, JSON.stringify(body).slice(0, 200));
+      return;
+    }
+    const errTxt = typeof r.data === "string" ? r.data : JSON.stringify(r.data || {});
+    throw new Error(`send failed: ${r.status} ${errTxt.slice(0, 400)}`);
   } catch (e) {
-    console.error("uTalk erro (toPhone):", e?.response?.data || e.message);
+    const st = e?.response?.status;
+    const bd = e?.response?.data;
+    console.warn("uTalk erro:", st ?? "-", typeof bd === "string" ? bd : JSON.stringify(bd || e.message));
   }
 }
 
@@ -181,11 +180,11 @@ function decideValidateState(status, data) {
     if (/<!doctype|<html/i.test(txt)) return "unknown";
     if (data && data.error === false && (data?.message?.mac || data?.message?.id)) return "valid";
     const yes = data === true || data === 1 || data?.valid === true || data?.ok === true || data?.exists === true || data?.success === true ||
-                String(data?.status || "").toLowerCase() === "valid" || String(data?.result || "").toLowerCase() === "valid" ||
-                /\b(ok|true|válido|valido|success)\b/i.test(txt);
+      String(data?.status || "").toLowerCase() === "valid" || String(data?.result || "").toLowerCase() === "valid" ||
+      /\b(ok|true|válido|valido|success)\b/i.test(txt);
     if (yes) return "valid";
     const no = data === false || data === 0 || data?.valid === false || data?.ok === false || data?.exists === false || data?.success === false ||
-               /\b(invalid|inválid|nao\s*encontrado|não\s*encontrado|not\s*found)\b/i.test(txt);
+      /\b(invalid|inválid|nao\s*encontrado|não\s*encontrado|not\s*found)\b/i.test(txt);
     if (no) return "invalid";
     return "unknown";
   }
@@ -209,8 +208,8 @@ async function validateMacDetailed(mac17) {
 function looksOk(body) {
   const txt = typeof body === "string" ? body : JSON.stringify(body || "");
   return body === true || body?.ok === true || body?.success === true || body?.error === false ||
-         String(body?.status || "").toLowerCase() === "ok" ||
-         /\b(ok|success|enviad[oa]|atualizad[oa]|uploaded|created|update\s*ok)\b/i.test(txt);
+    String(body?.status || "").toLowerCase() === "ok" ||
+    /\b(ok|success|enviad[oa]|atualizad[oa]|uploaded|created|update\s*ok)\b/i.test(txt);
 }
 function shouldRetry(status, msg) {
   if (status >= 500 && status < 600) return true;
@@ -283,14 +282,14 @@ async function uploadPlaylist({ mac, url, name }) {
   return last;
 }
 
-/* ========= ENDPOINT ASSÍNCRONO (opcional WhatsApp) =========
- * Entrada: { mac, usuario, senha, [reply_to], [servidor|app], [type], [output] }
+/* ========= ENDPOINT ASSÍNCRONO (se quiser manter) =========
+ * Entrada: { mac, usuario, senha, [reply_to], [chatId], [servidor|app], [type], [output] }
  * Resposta imediata: { ok:true, accepted:true }
  */
-app.post("/gerar-link", async (req, res) => {
+app.post("/gerar-link-async", async (req, res) => {
   const body = normalizeWebhookKeys(req.body || {});
   const macNorm = normalizeMac(body.mac);
-  const reply_to_chat  = body.chatId;   // ✅ chatId do payload
+  const reply_to_chat  = body.chatId;   // chatId do payload
   const reply_to_phone = body.reply_to; // número (opcional)
 
   if (!macNorm)  return res.status(400).json({ ok: false, error: "NO_MAC" });
@@ -329,8 +328,8 @@ app.post("/gerar-link", async (req, res) => {
   })().catch(err => console.error("bg_task_error:", err?.message));
 });
 
-/* ========= ENDPOINT SÍNCRONO (Worke) =========
- * Entrada: { mac, usuario, senha, [servidor|app], [type], [output] }
+/* ========= ENDPOINT SÍNCRONO =========
+ * Entrada: { mac, usuario, senha, [reply_to], [chatId], [servidor|app], [type], [output] }
  * Resposta: { ok:true } | { ok:false, reason }
  */
 async function validateMacQuick(mac17, timeoutMs = 5000) {
@@ -356,13 +355,15 @@ async function uploadPlaylistQuick({ mac, url, name, timeoutMs = 10000 }) {
     return { ok: false, status: 0, body: e.message };
   }
 }
+
 app.post("/gerar-link", async (req, res) => {
   const body = normalizeWebhookKeys(req.body || {});
   const macNorm = normalizeMac(body.mac);
 
-  // 👇 agora temos os dois
   const reply_to_phone = body.reply_to; // número, se vier
   const reply_to_chat  = body.chatId;   // chatId, se vier
+  const toContactId    = body.toContactId || body.contatoId || body.contactId;
+  const fromChannelId  = body.fromChannelId || body.canalId || body.channelId;
 
   if (!macNorm)  return res.status(400).json({ ok: false, error: "NO_MAC" });
 
@@ -372,7 +373,7 @@ app.post("/gerar-link", async (req, res) => {
 
   if (!userM3U) return res.status(400).json({ ok: false, error: "NO_M3U" });
 
-  res.json({ ok: true, accepted: true });
+  res.json({ ok: true });
 
   (async () => {
     const v = await validateMacDetailed(macNorm);
@@ -380,16 +381,20 @@ app.post("/gerar-link", async (req, res) => {
 
     if (v.state === "invalid") {
       if (reply_to_phone || reply_to_chat) {
-        await talkSend({ toPhone: reply_to_phone, chatId: reply_to_chat,
-          message: "❌ Não foi possível incluir o serviço. O MAC informado é inválido. Por favor, confira nas configurações da TV/app e repita o processo." });
+        await talkSend({
+          toContactId, fromChannelId, chatId: reply_to_chat, toPhone: reply_to_phone,
+          message: "❌ Não foi possível incluir o serviço. O MAC informado é inválido. Por favor, confira nas configurações da TV/app e repita o processo."
+        });
       }
       return;
     }
 
     if (SAFE_MODE_STRICT && !breakerAllow()) {
       if (reply_to_phone || reply_to_chat) {
-        await talkSend({ toPhone: reply_to_phone, chatId: reply_to_chat,
-          message: "⚠️ Não foi possível incluir o serviço agora. Por favor, repita o processo." });
+        await talkSend({
+          toContactId, fromChannelId, chatId: reply_to_chat, toPhone: reply_to_phone,
+          message: "⚠️ Não foi possível incluir o serviço agora. Por favor, repita o processo."
+        });
       }
       return;
     }
@@ -398,10 +403,14 @@ app.post("/gerar-link", async (req, res) => {
     breakerReport(up.ok);
 
     if (reply_to_phone || reply_to_chat) {
-      if (up.ok) await talkSend({ toPhone: reply_to_phone, chatId: reply_to_chat,
-         message: "✅ Serviço incluído com sucesso, feche e abra o aplicativo." });
-      else       await talkSend({ toPhone: reply_to_phone, chatId: reply_to_chat,
-         message: "⚠️ Não foi possível incluir o serviço agora. Por favor, repita o processo." });
+      if (up.ok) await talkSend({
+        toContactId, fromChannelId, chatId: reply_to_chat, toPhone: reply_to_phone,
+        message: "✅ Serviço incluído com sucesso, feche e abra o aplicativo."
+      });
+      else await talkSend({
+        toContactId, fromChannelId, chatId: reply_to_chat, toPhone: reply_to_phone,
+        message: "⚠️ Não foi possível incluir o serviço agora. Por favor, repita o processo."
+      });
     }
   })().catch(err => console.error("bg_task_error:", err?.message));
 });
@@ -410,9 +419,17 @@ app.post("/gerar-link", async (req, res) => {
 app.post("/_talk", async (req, res) => {
   try {
     const msg = req.body.message || "✅ Teste de envio (server)";
-    await talkSend({ chatId: req.body.chatId, toPhone: req.body.to, message: msg });
+    await talkSend({
+      toContactId: req.body.toContactId,
+      fromChannelId: req.body.fromChannelId,
+      chatId: req.body.chatId,
+      toPhone: req.body.to,
+      message: msg
+    });
     res.json({ ok: true });
-  } catch { res.status(500).json({ ok: false }); }
+  } catch {
+    res.status(500).json({ ok: false });
+  }
 });
 
 app.post("/_probe", async (req, res) => {
