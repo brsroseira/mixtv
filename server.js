@@ -135,17 +135,19 @@ const BROWSER_HEADERS = {
 async function talkSend({ toContactId, fromChannelId, chatId, toPhone, message }) {
   if (!TALK_TOKEN) { console.error("talkSend: faltando TALK_API_TOKEN"); return; }
 
-  const base = { organizationId: TALK_ORG_ID, message };
+  // ⚠️ uTalk espera TitleCase nas chaves
+  const base = { OrganizationId: TALK_ORG_ID, Message: message };
 
   let body = null;
   if (toContactId || fromChannelId) {
     body = { ...base };
-    if (toContactId) body.toContactId = toContactId;
-    if (fromChannelId) body.fromChannelId = fromChannelId;
+    if (toContactId)  body.ToContactId  = toContactId;
+    if (fromChannelId) body.FromChannelId = fromChannelId;
   } else if (chatId) {
-    body = { ...base, chatId };
+    // alguns ambientes exigem FromPhone também quando usando ChatId
+    body = { ...base, ChatId: chatId, FromPhone: TALK_FROM_PHONE };
   } else if (toPhone) {
-    body = { ...base, toPhone: e164BR(toPhone), fromPhone: TALK_FROM_PHONE };
+    body = { ...base, ToPhone: e164BR(toPhone), FromPhone: TALK_FROM_PHONE };
   }
 
   if (!body) { console.warn("talkSend: sem destino (id/chat/phone)"); return; }
@@ -154,8 +156,15 @@ async function talkSend({ toContactId, fromChannelId, chatId, toPhone, message }
     const r = await axios.post(
       `${TALK_BASE}/v1/messages/simplified`,
       body,
-      { headers: { Authorization: authHeader(), "Content-Type": "application/json", Accept: "application/json" },
-        timeout: 15000, validateStatus: () => true }
+      {
+        headers: {
+          Authorization: authHeader(),
+          "Content-Type": "application/json",
+          Accept: "application/json"
+        },
+        timeout: 15000,
+        validateStatus: () => true
+      }
     );
     if (r.status >= 200 && r.status < 300) {
       console.log("talkSend OK ->", r.status, JSON.stringify(body).slice(0, 200));
