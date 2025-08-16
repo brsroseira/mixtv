@@ -294,40 +294,60 @@ async function uploadPlaylist({ mac, url, name }) {
  * Entrada: { mac, usuario, senha, [reply_to], [chatId], [servidor|app], [type], [output] }
  * Resposta imediata: { ok:true, accepted:true }
  */
-app.post("/gerar-link-async", async (req, res) => {
+app.post("/gerar-link-sync", async (req, res) => {
   const body = normalizeWebhookKeys(req.body || {});
   const macNorm = normalizeMac(body.mac);
-  const reply_to_chat  = body.chatId;   // chatId do payload
-  const reply_to_phone = body.reply_to; // número (opcional)
+  const reply_to_phone = body.reply_to;
+  const reply_to_chat  = body.chatId;
 
-  if (!macNorm)  return res.status(400).json({ ok: false, error: "NO_MAC" });
+  if (!macNorm) return res.status(400).json({ ok: false, error: "NO_MAC" });
 
   const userM3U = (body.username && body.password)
-    ? buildM3UFromFields({ username: body.username, password: body.password, type: body?.type || M3U_TYPE_DEFAULT, output: body?.output || M3U_OUTPUT_DEFAULT })
+    ? buildM3UFromFields({
+        username: body.username,
+        password: body.password,
+        type: body?.type || M3U_TYPE_DEFAULT,
+        output: body?.output || M3U_OUTPUT_DEFAULT
+      })
     : null;
-
   if (!userM3U) return res.status(400).json({ ok: false, error: "NO_M3U" });
 
-  res.json({ ok: true, accepted: true });
+  // valida MAC
+  const v = await validateMacDetailed(macNorm);
+  if (v.state === "invalid") {
+    return res.json({ ok: false, reason: "INVALID_MAC", validate: { state: v.state, status: v.status } });
+  }
+  if (SAFE_MODE_STRICT && !breakerAllow()) {
+    return res.json({ ok: false, reason: "BREAKER_OPEN" });
+  }
 
-  (async () => {
-    const v = await validateMacDetailed(macNorm);
-    const displayName = (body?.displayName || body?.name || IPTV4K_UPLOAD_NAME_DEFAULT).slice(0, 64);
+  // sobe playlist
+  const name = (body?.displayName || body?.name || IPTV4K_UPLOAD_NAME_DEFAULT).slice(0, 64);
+  const up = await uploadPlaylist({ mac: macNorm, url: userM3U, name });
+  breakerReport(up.status >= 200 && up.status < 300);
+  const success = up.ok && up.status === 200;
 
-    // Só continua em cenários válidos; sem notificação em inválido/breaker
-    if (v.state === "invalid") return;
-    if (SAFE_MODE_STRICT && !breakerAllow()) return;
-
-    const up = await uploadPlaylist({ mac: macNorm, url: userM3U, name: displayName });
-    breakerReport(up.ok);
-
-    // ✅ Só notifica quando for 200 OK + corpo positivo
-    const success = up.ok && up.status === 200;
-    if (success && (reply_to_chat || reply_to_phone)) {
-      await talkSend({ chatId: reply_to_chat, toPhone: reply_to_phone,
-        message: "✅ Serviço incluído com sucesso. Feche e abra o app." });
+  // tenta notificar só em sucesso
+  let notify = { attempted: false };
+  if (success && (reply_to_phone || reply_to_chat)) {
+    try {
+      await talkSend({
+        chatId: reply_to_chat,
+        toPhone: reply_to_phone,
+        message: "✅ Serviço incluído com sucesso, feche e abra o aplicativo."
+      });
+      notify = { attempted: true };
+    } catch {
+      notify = { attempted: true };
     }
-  })().catch(err => console.error("bg_task_error:", err?.message));
+  }
+
+  return res.json({
+    ok: success,
+    validate: { state: v.state, status: v.status },
+    upload:   { status: up.status, ok: up.ok },
+    notify
+  });
 });
 
 /* ========= ENDPOINT SÍNCRONO =========
