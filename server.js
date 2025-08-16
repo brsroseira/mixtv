@@ -8,7 +8,7 @@ app.use(express.urlencoded({ extended: true })); // aceita x-www-form-urlencoded
 /* ========= uTalk (opcional; só se vier reply_to) ========= */
 const TALK_BASE = process.env.TALK_API_BASE || "https://app-utalk.umbler.com/api";
 // 👉 Deixe o env **sem** "Bearer " (apenas o token cru)
-const TALK_TOKEN = process.env.TALK_API_TOKEN || "mix-2025-08-14-2093-09-01--741B6EA4A6E61EED9F4C21E10CD2B8811E2A050F14533130FD2E8C0B672A979";
+const TALK_TOKEN = process.env.TALK_API_TOKEN || "MIX-2025-08-16-2093-09-04--221DC8E176B98A8DB9D7BC972F78591F45BAFCB679D88B1CC63E0CFE003A5D84";
 const TALK_ORG_ID = process.env.TALK_ORG_ID || "aF3zZgwcLc4qDRuo";
 const TALK_FROM_PHONE = process.env.TALK_FROM_PHONE || "+5573981731354";
 const authHeader = () =>
