@@ -135,36 +135,29 @@ const BROWSER_HEADERS = {
 async function talkSend({ toContactId, fromChannelId, chatId, toPhone, message }) {
   if (!TALK_TOKEN) { console.error("talkSend: faltando TALK_API_TOKEN"); return; }
 
-  // uTalk exige TitleCase
+  // uTalk pede TitleCase
   const base = { OrganizationId: TALK_ORG_ID, Message: message };
 
   let body = null;
   if (toContactId || fromChannelId) {
-    body = { ...base };
+    body = { ...base, FromPhone: TALK_FROM_PHONE };
     if (toContactId)   body.ToContactId   = toContactId;
     if (fromChannelId) body.FromChannelId = fromChannelId;
-    body.FromPhone = TALK_FROM_PHONE; // ajuda canais que exigem FromPhone
   } else if (chatId) {
     body = { ...base, ChatId: chatId, FromPhone: TALK_FROM_PHONE };
   } else if (toPhone) {
     body = { ...base, ToPhone: e164BR(toPhone), FromPhone: TALK_FROM_PHONE };
   }
-
   if (!body) { console.warn("talkSend: sem destino (id/chat/phone)"); return; }
 
   try {
-    const r = await axios.post(
-      `${TALK_BASE}/v1/messages/simplified`,
-      body,
-      { headers: { Authorization: authHeader(), "Content-Type": "application/json", Accept: "application/json" },
-        timeout: 15000, validateStatus: () => true }
-    );
-    if (r.status >= 200 && r.status < 300) {
-      console.log("talkSend OK ->", r.status);
-      return;
-    }
+    const r = await axios.post(`${TALK_BASE}/v1/messages/simplified`, body, {
+      headers: { Authorization: authHeader(), "Content-Type": "application/json", Accept: "application/json" },
+      timeout: 15000, validateStatus: () => true
+    });
+    if (r.status >= 200 && r.status < 300) { console.log("talkSend OK ->", r.status); return; }
     const errTxt = typeof r.data === "string" ? r.data : JSON.stringify(r.data || {});
-    throw new Error(`send failed: ${r.status} ${errTxt.slice(0, 300)}`);
+    throw new Error(`send failed: ${r.status} ${errTxt.slice(0,300)}`);
   } catch (e) {
     const st = e?.response?.status, bd = e?.response?.data;
     console.warn("uTalk erro:", st ?? "-", typeof bd === "string" ? bd : JSON.stringify(bd || e.message));
@@ -256,6 +249,19 @@ async function uploadPlaylist({ mac, url, name }) {
       last = r; if (!shouldRetry(r.status, String(r.raw || ""))) break; await sleep(600 * (i + 1));
     }
   }
+  async function validateMacDetailed(mac17) {
+  const url = fill(IPTV4K_VALIDATE_URL_TEMPLATE, { mac: mac17 });
+  try {
+    const r = await axios.get(url, { headers: BROWSER_HEADERS, timeout: VALIDATE_TIMEOUT_MS, validateStatus: () => true });
+    const snippet = typeof r.data === "string" ? r.data : JSON.stringify(r.data);
+    const state = decideValidateState(r.status, r.data);
+    console.log("validateMac:", mac17, "->", state, "status:", r.status, "snippet:", snippet.replace(/\s+/g," ").slice(0,200));
+    return { state, status: r.status, snippet };
+  } catch (e) {
+    console.log("validateMac error:", mac17, e.message);
+    return { state: "unknown", status: 0, snippet: e.message };
+  }
+}
   return last;
 }
 
