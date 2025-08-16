@@ -6,13 +6,12 @@ app.use(express.json({ limit: "1mb" }));
 app.use(express.urlencoded({ extended: true })); // aceita x-www-form-urlencoded
 
 /* ========= uTalk (opcional; só se vier reply_to) ========= */
-const TALK_BASE = process.env.TALK_API_BASE || "https://app-utalk.umbler.com/api";
-// 👉 Deixe o env **sem** "Bearer " (apenas o token cru)
-const TALK_TOKEN = process.env.TALK_API_TOKEN || "MIX-2025-08-16-2093-09-04--221DC8E176B98A8DB9D7BC972F78591F45BAFCB679D88B1CC63E0CFE003A5D84";
-const TALK_ORG_ID = process.env.TALK_ORG_ID || "aF3zZgwcLc4qDRuo";
-const TALK_FROM_PHONE = process.env.TALK_FROM_PHONE || "+5573981731354";
-const authHeader = () =>
-  (TALK_TOKEN || "").startsWith("Bearer ") ? TALK_TOKEN : `Bearer ${TALK_TOKEN}`;
+const TALK_BASE = "https://app-utalk.umbler.com/api";
+const TALK_TOKEN = "MIX-2025-08-16-2093-09-04--221DC8E176B98A8DB9D7BC972F78591F45BAFCB679D88B1CC63E0CFE003A5D84"; // sem "Bearer "
+const TALK_ORG_ID = "aF3zZgwcLc4qDRuo";      // fixo
+const TALK_FROM_PHONE = "+5573981731354";     // fixo
+const authHeader = () => `Bearer ${(TALK_TOKEN || "").replace(/^Bearer\s+/i, "").trim()}`;
+
 
 /* ========= IPTV-4K (env/config) ========= */
 const IPTV4K_VALIDATE_URL_TEMPLATE =
@@ -138,7 +137,6 @@ async function talkSend({ toContactId, fromChannelId, chatId, toPhone, message }
 
   const base = { organizationId: TALK_ORG_ID, message };
 
-  // monta body conforme prioridade
   let body = null;
   if (toContactId || fromChannelId) {
     body = { ...base };
@@ -156,7 +154,8 @@ async function talkSend({ toContactId, fromChannelId, chatId, toPhone, message }
     const r = await axios.post(
       `${TALK_BASE}/v1/messages/simplified`,
       body,
-      { headers: { Authorization: authHeader(), "Content-Type": "application/json" }, timeout: 15000, validateStatus: () => true }
+      { headers: { Authorization: authHeader(), "Content-Type": "application/json", Accept: "application/json" },
+        timeout: 15000, validateStatus: () => true }
     );
     if (r.status >= 200 && r.status < 300) {
       console.log("talkSend OK ->", r.status, JSON.stringify(body).slice(0, 200));
@@ -165,8 +164,7 @@ async function talkSend({ toContactId, fromChannelId, chatId, toPhone, message }
     const errTxt = typeof r.data === "string" ? r.data : JSON.stringify(r.data || {});
     throw new Error(`send failed: ${r.status} ${errTxt.slice(0, 400)}`);
   } catch (e) {
-    const st = e?.response?.status;
-    const bd = e?.response?.data;
+    const st = e?.response?.status, bd = e?.response?.data;
     console.warn("uTalk erro:", st ?? "-", typeof bd === "string" ? bd : JSON.stringify(bd || e.message));
   }
 }
