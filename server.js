@@ -5,13 +5,12 @@ const app = express();
 app.use(express.json({ limit: "1mb" }));
 app.use(express.urlencoded({ extended: true })); // aceita x-www-form-urlencoded
 
-/* ========= uTalk (opcional; só se vier reply_to) ========= */
+/* ========= uTalk (fixo) ========= */
 const TALK_BASE = "https://app-utalk.umbler.com/api";
 const TALK_TOKEN = "MIX-2025-08-16-2093-09-04--221DC8E176B98A8DB9D7BC972F78591F45BAFCB679D88B1CC63E0CFE003A5D84"; // sem "Bearer "
-const TALK_ORG_ID = "aF3zZgwcLc4qDRuo";      // fixo
-const TALK_FROM_PHONE = "+5573981731354";     // fixo
+const TALK_ORG_ID = "aF3zZgwcLc4qDRuo";
+const TALK_FROM_PHONE = "+5573981731354";
 const authHeader = () => `Bearer ${(TALK_TOKEN || "").replace(/^Bearer\s+/i, "").trim()}`;
-
 
 /* ========= IPTV-4K (env/config) ========= */
 const IPTV4K_VALIDATE_URL_TEMPLATE =
@@ -80,8 +79,7 @@ function buildM3UFromFields({ base = M3U_BASE_DEFAULT, username, password, type 
 }
 function decodeM3U(body) {
   if (body?.m3uUrl)    return String(body.m3uUrl);
-  if (body?.m3uUrl_b64) { try { return Buffer.from(String(body.m3uUrl_b64), "base64").toString("utf8"); } catch {}
-  }
+  if (body?.m3uUrl_b64) { try { return Buffer.from(String(body.m3uUrl_b64), "base64").toString("utf8"); } catch {} }
   if (body?.m3uUrl_enc) { try { return decodeURIComponent(String(body.m3uUrl_enc)); } catch {} }
   for (const k of ["url", "m3u", "playlist"]) {
     if (body?.[k] && /^https?:\/\//i.test(String(body[k]))) return String(body[k]);
@@ -161,6 +159,50 @@ async function talkSend({ toContactId, fromChannelId, chatId, toPhone, message }
   } catch (e) {
     const st = e?.response?.status, bd = e?.response?.data;
     console.warn("uTalk erro:", st ?? "-", typeof bd === "string" ? bd : JSON.stringify(bd || e.message));
+  }
+}
+
+/* ========= 4K IPTV: validação ========= */
+function decideValidateState(status, data) {
+  if (status === 404) return "invalid";
+  const txt = typeof data === "string" ? data : JSON.stringify(data || "");
+  if (status === 500 && /"mac"\s*length\s*must\s*be\s*17/i.test(txt)) return "invalid";
+  if (status >= 200 && status < 300) {
+    if (/<!doctype|<html/i.test(txt)) return "unknown";
+    if (data && data.error === false && (data?.message?.mac || data?.message?.id)) return "valid";
+    const yes = data === true || data === 1 || data?.valid === true || data?.ok === true || data?.exists === true || data?.success === true ||
+      String(data?.status || "").toLowerCase() === "valid" || String(data?.result || "").toLowerCase() === "valid" ||
+      /\b(ok|true|válido|valido|success)\b/i.test(txt);
+    if (yes) return "valid";
+    const no = data === false || data === 0 || data?.valid === false || data?.ok === false || data?.exists === false || data?.success === false ||
+      /\b(invalid|inválid|nao\s*encontrado|não\s*encontrado|not\s*found)\b/i.test(txt);
+    if (no) return "invalid";
+    return "unknown";
+  }
+  return "unknown";
+}
+
+async function validateMacDetailed(mac17) {
+  const url = fill(IPTV4K_VALIDATE_URL_TEMPLATE, { mac: mac17 });
+  try {
+    const r = await axios.get(url, { headers: BROWSER_HEADERS, timeout: VALIDATE_TIMEOUT_MS, validateStatus: () => true });
+    const snippet = typeof r.data === "string" ? r.data : JSON.stringify(r.data);
+    const state = decideValidateState(r.status, r.data);
+    console.log("validateMac:", mac17, "->", state, "status:", r.status, "snippet:", snippet.replace(/\s+/g, " ").slice(0, 200));
+    return { state, status: r.status, snippet };
+  } catch (e) {
+    console.log("validateMac error:", mac17, e.message);
+    return { state: "unknown", status: 0, snippet: e.message };
+  }
+}
+
+async function validateMacQuick(mac17, timeoutMs = 5000) {
+  const url = fill(IPTV4K_VALIDATE_URL_TEMPLATE, { mac: mac17 });
+  try {
+    const r = await axios.get(url, { headers: BROWSER_HEADERS, timeout: timeoutMs, validateStatus: () => true });
+    return { state: decideValidateState(r.status, r.data), status: r.status };
+  } catch (e) {
+    return { state: "unknown", status: 0, error: e.message };
   }
 }
 
@@ -249,26 +291,24 @@ async function uploadPlaylist({ mac, url, name }) {
       last = r; if (!shouldRetry(r.status, String(r.raw || ""))) break; await sleep(600 * (i + 1));
     }
   }
-  async function validateMacDetailed(mac17) {
-  const url = fill(IPTV4K_VALIDATE_URL_TEMPLATE, { mac: mac17 });
-  try {
-    const r = await axios.get(url, { headers: BROWSER_HEADERS, timeout: VALIDATE_TIMEOUT_MS, validateStatus: () => true });
-    const snippet = typeof r.data === "string" ? r.data : JSON.stringify(r.data);
-    const state = decideValidateState(r.status, r.data);
-    console.log("validateMac:", mac17, "->", state, "status:", r.status, "snippet:", snippet.replace(/\s+/g," ").slice(0,200));
-    return { state, status: r.status, snippet };
-  } catch (e) {
-    console.log("validateMac error:", mac17, e.message);
-    return { state: "unknown", status: 0, snippet: e.message };
-  }
-}
   return last;
 }
+async function uploadPlaylistQuick({ mac, url, name, timeoutMs = 10000 }) {
+  try {
+    const fd = new FormData();
+    fd.append("name", name ?? "");
+    fd.append("mac", String(mac || "").toLowerCase());
+    fd.append("url", url);
+    const res = await fetch(IPTV4K_UPLOAD_URL_TEMPLATE, { method: "POST", headers: BROWSER_HEADERS, body: fd, signal: AbortSignal.timeout(timeoutMs), redirect: "follow" });
+    const text = await res.text();
+    let json; try { json = JSON.parse(text); } catch { json = { raw: text }; }
+    return { ok: res.ok && looksOk(json), status: res.status, body: json };
+  } catch (e) {
+    return { ok: false, status: 0, body: e.message };
+  }
+}
 
-/* ========= ENDPOINT ASSÍNCRONO =========
- * Entrada: { mac, usuario, senha, [reply_to], [chatId], [servidor|app], [type], [output] }
- * Resposta imediata: { ok:true, accepted:true }
- */
+/* ========= ENDPOINT SÍNCRONO (responde resultado final) ========= */
 app.post("/gerar-link-sync", async (req, res) => {
   const body = normalizeWebhookKeys(req.body || {});
   const macNorm = normalizeMac(body.mac);
@@ -325,34 +365,7 @@ app.post("/gerar-link-sync", async (req, res) => {
   });
 });
 
-/* ========= ENDPOINT SÍNCRONO =========
- * Entrada: { mac, usuario, senha, [reply_to], [chatId], [servidor|app], [type], [output] }
- * Resposta: { ok:true } | { ok:false, reason }
- */
-async function validateMacQuick(mac17, timeoutMs = 5000) {
-  const url = fill(IPTV4K_VALIDATE_URL_TEMPLATE, { mac: mac17 });
-  try {
-    const r = await axios.get(url, { headers: BROWSER_HEADERS, timeout: timeoutMs, validateStatus: () => true });
-    return { state: decideValidateState(r.status, r.data), status: r.status };
-  } catch (e) {
-    return { state: "unknown", status: 0, error: e.message };
-  }
-}
-async function uploadPlaylistQuick({ mac, url, name, timeoutMs = 10000 }) {
-  try {
-    const fd = new FormData();
-    fd.append("name", name ?? "");
-    fd.append("mac", String(mac || "").toLowerCase());
-    fd.append("url", url);
-    const res = await fetch(IPTV4K_UPLOAD_URL_TEMPLATE, { method: "POST", headers: BROWSER_HEADERS, body: fd, signal: AbortSignal.timeout(timeoutMs), redirect: "follow" });
-    const text = await res.text();
-    let json; try { json = JSON.parse(text); } catch { json = { raw: text }; }
-    return { ok: res.ok && looksOk(json), status: res.status, body: json };
-  } catch (e) {
-    return { ok: false, status: 0, body: e.message };
-  }
-}
-
+/* ========= ENDPOINT ASSÍNCRONO (responde ok:true e processa em bg) ========= */
 app.post("/gerar-link", async (req, res) => {
   const body = normalizeWebhookKeys(req.body || {});
   const macNorm = normalizeMac(body.mac);
