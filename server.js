@@ -135,16 +135,16 @@ const BROWSER_HEADERS = {
 async function talkSend({ toContactId, fromChannelId, chatId, toPhone, message }) {
   if (!TALK_TOKEN) { console.error("talkSend: faltando TALK_API_TOKEN"); return; }
 
-  // ⚠️ uTalk espera TitleCase nas chaves
+  // uTalk exige TitleCase
   const base = { OrganizationId: TALK_ORG_ID, Message: message };
 
   let body = null;
   if (toContactId || fromChannelId) {
     body = { ...base };
-    if (toContactId)  body.ToContactId  = toContactId;
+    if (toContactId)   body.ToContactId   = toContactId;
     if (fromChannelId) body.FromChannelId = fromChannelId;
+    body.FromPhone = TALK_FROM_PHONE; // ajuda canais que exigem FromPhone
   } else if (chatId) {
-    // alguns ambientes exigem FromPhone também quando usando ChatId
     body = { ...base, ChatId: chatId, FromPhone: TALK_FROM_PHONE };
   } else if (toPhone) {
     body = { ...base, ToPhone: e164BR(toPhone), FromPhone: TALK_FROM_PHONE };
@@ -156,58 +156,18 @@ async function talkSend({ toContactId, fromChannelId, chatId, toPhone, message }
     const r = await axios.post(
       `${TALK_BASE}/v1/messages/simplified`,
       body,
-      {
-        headers: {
-          Authorization: authHeader(),
-          "Content-Type": "application/json",
-          Accept: "application/json"
-        },
-        timeout: 15000,
-        validateStatus: () => true
-      }
+      { headers: { Authorization: authHeader(), "Content-Type": "application/json", Accept: "application/json" },
+        timeout: 15000, validateStatus: () => true }
     );
     if (r.status >= 200 && r.status < 300) {
-      console.log("talkSend OK ->", r.status, JSON.stringify(body).slice(0, 200));
+      console.log("talkSend OK ->", r.status);
       return;
     }
     const errTxt = typeof r.data === "string" ? r.data : JSON.stringify(r.data || {});
-    throw new Error(`send failed: ${r.status} ${errTxt.slice(0, 400)}`);
+    throw new Error(`send failed: ${r.status} ${errTxt.slice(0, 300)}`);
   } catch (e) {
     const st = e?.response?.status, bd = e?.response?.data;
     console.warn("uTalk erro:", st ?? "-", typeof bd === "string" ? bd : JSON.stringify(bd || e.message));
-  }
-}
-
-/* ========= 4K IPTV: validação ========= */
-function decideValidateState(status, data) {
-  if (status === 404) return "invalid";
-  const txt = typeof data === "string" ? data : JSON.stringify(data || "");
-  if (status === 500 && /"mac"\s*length\s*must\s*be\s*17/i.test(txt)) return "invalid";
-  if (status >= 200 && status < 300) {
-    if (/<!doctype|<html/i.test(txt)) return "unknown";
-    if (data && data.error === false && (data?.message?.mac || data?.message?.id)) return "valid";
-    const yes = data === true || data === 1 || data?.valid === true || data?.ok === true || data?.exists === true || data?.success === true ||
-      String(data?.status || "").toLowerCase() === "valid" || String(data?.result || "").toLowerCase() === "valid" ||
-      /\b(ok|true|válido|valido|success)\b/i.test(txt);
-    if (yes) return "valid";
-    const no = data === false || data === 0 || data?.valid === false || data?.ok === false || data?.exists === false || data?.success === false ||
-      /\b(invalid|inválid|nao\s*encontrado|não\s*encontrado|not\s*found)\b/i.test(txt);
-    if (no) return "invalid";
-    return "unknown";
-  }
-  return "unknown";
-}
-async function validateMacDetailed(mac17) {
-  const url = fill(IPTV4K_VALIDATE_URL_TEMPLATE, { mac: mac17 });
-  try {
-    const r = await axios.get(url, { headers: BROWSER_HEADERS, timeout: VALIDATE_TIMEOUT_MS, validateStatus: () => true });
-    const snippet = typeof r.data === "string" ? r.data : JSON.stringify(r.data);
-    const state = decideValidateState(r.status, r.data);
-    console.log("validateMac:", mac17, "->", state, "status:", r.status, "snippet:", snippet.replace(/\s+/g, " ").slice(0, 200));
-    return { state, status: r.status, snippet };
-  } catch (e) {
-    console.log("validateMac error:", mac17, e.message);
-    return { state: "unknown", status: 0, snippet: e.message };
   }
 }
 
@@ -475,6 +435,24 @@ app.get("/_readyz",  (_, res) => {
   res.json({ ok: missing.length === 0, missing });
 });
 app.get("/health", (_, res) => res.json({ ok: true }));
+
+/* ========= whoami ========= */
+app.get("/_utalk_whoami", async (req, res) => {
+  try {
+    const r = await axios.get(`${TALK_BASE}/v1/member/me`, {
+      headers: { Authorization: authHeader(), Accept: "application/json" },
+      timeout: 10000, validateStatus: () => true
+    });
+    res.json({
+      status: r.status,
+      token_len: (TALK_TOKEN||"").length,
+      token_prefix: (TALK_TOKEN||"").slice(0,8),
+      token_suffix: (TALK_TOKEN||"").slice(-8),
+      org: TALK_ORG_ID,
+      from: TALK_FROM_PHONE
+    });
+  } catch (e) { res.status(500).json({ ok:false, err: e.message }); }
+});
 
 /* ========= Start ========= */
 app.listen(PORT, () => console.log(`ON :${PORT}`));
