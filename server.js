@@ -1,3 +1,4 @@
+// app.js
 import express from "express";
 import axios from "axios";
 
@@ -12,15 +13,13 @@ const TALK_ORG_ID = "aF3zZgwcLc4qDRuo";
 const TALK_FROM_PHONE = "+5573981731354";
 const authHeader = () => `Bearer ${(TALK_TOKEN || "").replace(/^Bearer\s+/i, "").trim()}`;
 
-/* ========= IPTV-4K (env/config) ========= */
+/* ========= IPTV (defaults) ========= */
 const IPTV4K_VALIDATE_URL_TEMPLATE =
   process.env.IPTV4K_VALIDATE_URL_TEMPLATE ||
   "https://api.iptv-4k.live/api/validate_mac?mac={mac}";
-
 const IPTV4K_UPLOAD_URL_TEMPLATE =
   process.env.IPTV4K_UPLOAD_URL_TEMPLATE ||
   "https://api.iptv-4k.live/api/playlist_with_mac";
-
 const IPTV4K_UPLOAD_URL_ALT =
   process.env.IPTV4K_UPLOAD_URL_ALT ||
   "https://iptv-4k.live/api/playlist_with_mac";
@@ -90,17 +89,17 @@ function decodeM3U(body) {
 }
 function normalizeWebhookKeys(body = {}) {
   const out = { ...body };
-  // credenciais (Worker)
+  // credenciais
   if (!out.username && body.usuario) out.username = body.usuario;
   if (!out.password && (body.senha || body.pass)) out.password = body.senha || body.pass;
 
   // MAC possíveis
   out.mac = out.mac || body.mac || body.mac_address || body.endereco_mac || body.device_mac || body.m;
 
-  // telefone opcional (se vier; para WhatsApp)
+  // telefone opcional
   if (!out.reply_to && body.telefone) out.reply_to = body.telefone;
 
-  // aceitar chatId vindo de várias chaves
+  // aceitar chatId de várias chaves
   out.chatId = out.chatId
     || body.chatId
     || body?.Conversa?.Id
@@ -110,7 +109,7 @@ function normalizeWebhookKeys(body = {}) {
     || body?.contato?.ChatID
     || body?.chat_id;
 
-  // nome exibido no 4K
+  // nome exibido
   if (!out.displayName && body.servidor) out.displayName = String(body.servidor);
   if (!out.displayName && body.app) out.displayName = String(body.app);
   return out;
@@ -127,9 +126,68 @@ const BROWSER_HEADERS = {
   "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36"
 };
 
-/* ========= uTalk =========
-   Prioridade: IDs > chatId > phone
-*/
+/* ========= Multi-provedor ========= */
+const PROVIDER_HOST_DEFAULT =
+  (process.env.UPLOAD_HOST_DEFAULT || "iptv-4k.live").toLowerCase();
+
+const PROVIDER_HOSTS = {
+  "iptv 4k": "iptv-4k.live",
+  "4k": "iptv-4k.live",
+  "iptv player io": "iptvplayer.io",
+  "playerio": "iptvplayer.io",
+  "ottplayer": "simpletv.live",
+  "simpletv": "simpletv.live",
+  "tiviplayer iptv": "tiviplayer.io",
+  "tiviplayer": "tiviplayer.io",
+  "i player": "i-player.live",
+  "iplayer": "i-player.live",
+  "iptv+": "iptvpluseplayer.live",
+  "iptv plus": "iptvpluseplayer.live",
+  "iptv pro player": "iptvproplayer.live",
+  "iptv star player": "iptv-star.live",
+  "iptv next player": "iptvnext.live",
+  "play iptv": "tiviplayer.io"
+};
+
+function _sanitizeHost(h) {
+  return String(h || "")
+    .replace(/^https?:\/\//i, "")
+    .replace(/\/.*$/, "")
+    .toLowerCase();
+}
+function _pickHostFromBody(body = {}) {
+  const explicit = body.host || body.uploadHost || body.domain || body.appDomain;
+  if (explicit) return _sanitizeHost(explicit);
+
+  const key = String(body.app || body.servidor || body.provider || body.brand || "")
+    .trim()
+    .toLowerCase();
+  if (key && PROVIDER_HOSTS[key]) return PROVIDER_HOSTS[key];
+
+  return PROVIDER_HOST_DEFAULT;
+}
+function buildProviderEndpoints(body = {}) {
+  const main = _pickHostFromBody(body);
+  const fallbacks = (process.env.UPLOAD_HOST_FALLBACKS || "")
+    .split(",")
+    .map(_sanitizeHost)
+    .filter(Boolean);
+  const hosts = [main, ...fallbacks];
+
+  const validateTemplates = hosts.map(
+    (h) => `https://${h}/api/validate_mac?mac={mac}`
+  );
+  const uploadEndpoints = hosts.map(
+    (h) => `https://${h}/api/playlist_with_mac`
+  );
+
+  const displayName =
+    body?.displayName || body?.name || body?.app || IPTV4K_UPLOAD_NAME_DEFAULT;
+
+  return { validateTemplates, uploadEndpoints, displayName };
+}
+
+/* ========= uTalk ========= */
 async function talkSend({ toContactId, fromChannelId, chatId, toPhone, message }) {
   if (!TALK_TOKEN) { console.error("talkSend: faltando TALK_API_TOKEN"); return; }
 
@@ -182,18 +240,34 @@ function decideValidateState(status, data) {
   return "unknown";
 }
 
-async function validateMacDetailed(mac17) {
-  const url = fill(IPTV4K_VALIDATE_URL_TEMPLATE, { mac: mac17 });
-  try {
-    const r = await axios.get(url, { headers: BROWSER_HEADERS, timeout: VALIDATE_TIMEOUT_MS, validateStatus: () => true });
-    const snippet = typeof r.data === "string" ? r.data : JSON.stringify(r.data);
-    const state = decideValidateState(r.status, r.data);
-    console.log("validateMac:", mac17, "->", state, "status:", r.status, "snippet:", snippet.replace(/\s+/g, " ").slice(0, 200));
-    return { state, status: r.status, snippet };
-  } catch (e) {
-    console.log("validateMac error:", mac17, e.message);
-    return { state: "unknown", status: 0, snippet: e.message };
+async function validateMacDetailed(mac17, validateTemplatesOpt) {
+  const templates = (validateTemplatesOpt && validateTemplatesOpt.length)
+    ? validateTemplatesOpt
+    : [IPTV4K_VALIDATE_URL_TEMPLATE];
+
+  let last = { state: "unknown", status: 0, snippet: "" };
+
+  for (const tpl of templates) {
+    const url = fill(tpl, { mac: mac17 });
+    try {
+      const r = await axios.get(url, {
+        headers: BROWSER_HEADERS,
+        timeout: VALIDATE_TIMEOUT_MS,
+        validateStatus: () => true
+      });
+      const snippet = typeof r.data === "string" ? r.data : JSON.stringify(r.data);
+      const state = decideValidateState(r.status, r.data);
+      console.log("validateMac:", url, "->", state, "status:", r.status);
+      last = { state, status: r.status, snippet };
+
+      if (state !== "unknown" || r.status === 404 || (r.status >= 200 && r.status < 300)) {
+        return last;
+      }
+    } catch (e) {
+      last = { state: "unknown", status: 0, snippet: e.message };
+    }
   }
+  return last;
 }
 
 async function validateMacQuick(mac17, timeoutMs = 5000) {
@@ -206,9 +280,8 @@ async function validateMacQuick(mac17, timeoutMs = 5000) {
   }
 }
 
-/* ========= 4K IPTV: upload ========= */
+/* ========= Upload ========= */
 function looksOk(body) {
-  // Objetos: só aceita sinais POSITIVOS explícitos
   if (body && typeof body === "object") {
     if ("error"   in body) return body.error   === false;
     if ("success" in body) return body.success === true;
@@ -218,7 +291,6 @@ function looksOk(body) {
     }
     return false;
   }
-  // Texto: bloqueia negativas antes de aceitar positivas
   const txt = String(typeof body === "string" ? body : JSON.stringify(body || "")).toLowerCase();
   if (/(error|erro|fail|falha|invalid|inválid|not\s*ok|nao\s*ok|não\s*ok)/.test(txt)) return false;
   return /\b(ok|success|enviado|enviada|atualizado|atualizada|uploaded|created|update\s*ok)\b/.test(txt);
@@ -235,7 +307,7 @@ async function postMultipart({ endpoint, mac, url, name }) {
   try {
     const fd = new FormData();
     fd.append("name", name ?? "");
-    fd.append("mac", String(mac || "").toLowerCase()); // site manda minúsculo
+    fd.append("mac", String(mac || "").toLowerCase());
     fd.append("url", url);
     const res = await fetch(endpoint, { method: "POST", headers: BROWSER_HEADERS, body: fd, signal: ctrl.signal, redirect: "follow" });
     const text = await res.text();
@@ -271,10 +343,13 @@ async function postJSON({ endpoint, mac, url, name }) {
     return { ok: false, status: 0, raw: e.message };
   }
 }
-async function uploadPlaylist({ mac, url, name }) {
-  const endpoints = [IPTV4K_UPLOAD_URL_TEMPLATE, IPTV4K_UPLOAD_URL_ALT];
+async function uploadPlaylist({ mac, url, name, endpoints }) {
+  const endpointsList = (endpoints && endpoints.length)
+    ? endpoints
+    : [IPTV4K_UPLOAD_URL_TEMPLATE, IPTV4K_UPLOAD_URL_ALT];
+
   let last = { ok: false, status: 0, raw: "no-attempt" };
-  for (const ep of endpoints) {
+  for (const ep of endpointsList) {
     for (let i = 0; i <= UPLOAD_RETRIES; i++) {
       const r = await postMultipart({ endpoint: ep, mac, url, name });
       if (r.ok) return r;
@@ -308,7 +383,7 @@ async function uploadPlaylistQuick({ mac, url, name, timeoutMs = 10000 }) {
   }
 }
 
-/* ========= ENDPOINT SÍNCRONO (responde resultado final) ========= */
+/* ========= ENDPOINT SÍNCRONO ========= */
 app.post("/gerar-link-sync", async (req, res) => {
   const body = normalizeWebhookKeys(req.body || {});
   const macNorm = normalizeMac(body.mac);
@@ -327,8 +402,8 @@ app.post("/gerar-link-sync", async (req, res) => {
     : null;
   if (!userM3U) return res.status(400).json({ ok: false, error: "NO_M3U" });
 
-  // valida MAC
-  const v = await validateMacDetailed(macNorm);
+  const { validateTemplates, uploadEndpoints, displayName } = buildProviderEndpoints(body);
+  const v = await validateMacDetailed(macNorm, validateTemplates);
   if (v.state === "invalid") {
     return res.json({ ok: false, reason: "INVALID_MAC", validate: { state: v.state, status: v.status } });
   }
@@ -336,13 +411,11 @@ app.post("/gerar-link-sync", async (req, res) => {
     return res.json({ ok: false, reason: "BREAKER_OPEN" });
   }
 
-  // sobe playlist
-  const name = (body?.displayName || body?.name || IPTV4K_UPLOAD_NAME_DEFAULT).slice(0, 64);
-  const up = await uploadPlaylist({ mac: macNorm, url: userM3U, name });
+  const name = String(displayName || "").slice(0, 64);
+  const up = await uploadPlaylist({ mac: macNorm, url: userM3U, name, endpoints: uploadEndpoints });
   breakerReport(up.status >= 200 && up.status < 300);
   const success = up.ok && up.status === 200;
 
-  // tenta notificar só em sucesso
   let notify = { attempted: false };
   if (success && (reply_to_phone || reply_to_chat)) {
     try {
@@ -365,13 +438,13 @@ app.post("/gerar-link-sync", async (req, res) => {
   });
 });
 
-/* ========= ENDPOINT ASSÍNCRONO (responde ok:true e processa em bg) ========= */
+/* ========= ENDPOINT ASSÍNCRONO ========= */
 app.post("/gerar-link", async (req, res) => {
   const body = normalizeWebhookKeys(req.body || {});
   const macNorm = normalizeMac(body.mac);
 
-  const reply_to_phone = body.reply_to; // número, se vier
-  const reply_to_chat  = body.chatId;   // chatId, se vier
+  const reply_to_phone = body.reply_to;
+  const reply_to_chat  = body.chatId;
   const toContactId    = body.toContactId || body.contatoId || body.contactId;
   const fromChannelId  = body.fromChannelId || body.canalId || body.channelId;
 
@@ -386,17 +459,16 @@ app.post("/gerar-link", async (req, res) => {
   res.json({ ok: true });
 
   (async () => {
-    const v = await validateMacDetailed(macNorm);
-    const displayName = (body?.displayName || body?.name || IPTV4K_UPLOAD_NAME_DEFAULT).slice(0, 64);
+    const { validateTemplates, uploadEndpoints, displayName } = buildProviderEndpoints(body);
+    const v = await validateMacDetailed(macNorm, validateTemplates);
+    const name = String(displayName || "").slice(0, 64);
 
-    // Só continua em cenários válidos; sem notificação em inválido/breaker
     if (v.state === "invalid") return;
     if (SAFE_MODE_STRICT && !breakerAllow()) return;
 
-    const up = await uploadPlaylist({ mac: macNorm, url: userM3U, name: displayName });
+    const up = await uploadPlaylist({ mac: macNorm, url: userM3U, name, endpoints: uploadEndpoints });
     breakerReport(up.ok);
 
-    // ✅ Só notifica quando for 200 OK + corpo positivo
     const success = up.ok && up.status === 200;
     if (success && (reply_to_phone || reply_to_chat)) {
       await talkSend({
@@ -430,12 +502,13 @@ app.post("/_probe", async (req, res) => {
   const m3u = (body?.username && body?.password)
     ? buildM3UFromFields({ username: body.username, password: body.password, type: body?.type || M3U_TYPE_DEFAULT, output: body?.output || M3U_OUTPUT_DEFAULT })
     : (decodeM3U(body) || body.url);
-  const name = (body?.displayName || body?.servidor || body?.app || IPTV4K_UPLOAD_NAME_DEFAULT).slice(0, 64);
+  const { validateTemplates, uploadEndpoints, displayName } = buildProviderEndpoints(body);
+  const name = String(displayName || "").slice(0, 64);
 
   if (!macNorm || !m3u) return res.status(400).json({ ok: false, error: "need mac + m3u/url" });
 
-  const v = await validateMacDetailed(macNorm);
-  const up = await uploadPlaylist({ mac: macNorm, url: m3u, name });
+  const v = await validateMacDetailed(macNorm, validateTemplates);
+  const up = await uploadPlaylist({ mac: macNorm, url: m3u, name, endpoints: uploadEndpoints });
 
   res.json({
     ok: true,
