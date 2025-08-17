@@ -114,12 +114,14 @@ const PROVIDER_HOSTS = {
   "iptv next player": "iptvnext.live",
   "play iptv": "tiviplayer.io"
 };
+
 const REQUIRE_PROVIDER = (process.env.REQUIRE_PROVIDER || "true").toLowerCase() === "true";
 const PROVIDER_ORDER = [
   "iptv-4k.live", "simpletv.live", "iptvplayer.io", "tiviplayer.io",
   "i-player.live", "iptvpluseplayer.live", "iptvproplayer.live",
   "iptv-star.live", "iptvnext.live"
 ];
+
 const HOST_BRAND = {
   "iptv-4k.live": "IPTV 4K",
   "simpletv.live": "OttPlayer",
@@ -130,7 +132,9 @@ const HOST_BRAND = {
   "iptvproplayer.live": "IPTV Pro Player",
   "iptv-star.live": "IPTV Star Player",
   "iptvnext.live": "IPTV Next Player"
+};
 
+// >>> estas funções ficam FORA do objeto <<<
 function _brandHost(h) {
   return String(h || "")
     .replace(/^https?:\/\//i, "")  // remove http(s)://
@@ -143,7 +147,7 @@ function pickBrand(displayName, host) {
   const h = _brandHost(host);
   return (displayName && String(displayName).trim())
       || HOST_BRAND[h]
-      || h.split(".")[0].toUpperCase(); // fallback
+      || h.split(".")[0].toUpperCase(); // fallback simpático
 }
 
 };
