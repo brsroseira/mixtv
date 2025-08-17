@@ -418,7 +418,7 @@ app.post("/gerar-link-sync", async (req, res) => {
       await talkSend({
         chatId: reply_to_chat,
         toPhone: reply_to_phone,
-        message: "✅ Serviço incluído com sucesso, feche e abra o aplicativo."
+        message: "✅ Serviço inserido automaticamente. Feche e abra o aplicativo — não precisa login."
       });
       notify = { attempted: true };
     } catch {
@@ -483,7 +483,7 @@ app.post("/gerar-link", async (req, res) => {
     if (success && (reply_to_phone || reply_to_chat)) {
       await talkSend({
         toContactId, fromChannelId, chatId: reply_to_chat, toPhone: reply_to_phone,
-        message: "✅ Serviço incluído com sucesso, feche e abra o aplicativo."
+        message: "✅ Serviço inserido automaticamente. Feche e abra o aplicativo — não precisa login."
       });
     }
   })().catch(err => console.error("bg_task_error:", err?.message));
