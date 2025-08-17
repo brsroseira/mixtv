@@ -67,17 +67,10 @@ function buildM3UFromFields({ base = M3U_BASE_DEFAULT, username, password, type 
 }
 function normalizeWebhookKeys(body = {}) {
   const out = { ...body };
-  // credenciais
   if (!out.username && body.usuario) out.username = body.usuario;
   if (!out.password && (body.senha || body.pass)) out.password = body.senha || body.pass;
-
-  // MAC
   out.mac = out.mac || body.mac || body.mac_address || body.endereco_mac || body.device_mac || body.m;
-
-  // telefone
   if (!out.reply_to && body.telefone) out.reply_to = body.telefone;
-
-  // chat IDs
   out.chatId = out.chatId
     || body.chatId
     || body?.Conversa?.Id
@@ -86,8 +79,6 @@ function normalizeWebhookKeys(body = {}) {
     || body?.Contato?.ChatID
     || body?.contato?.ChatID
     || body?.chat_id;
-
-  // nome exibido
   if (!out.displayName && body.servidor) out.displayName = String(body.servidor);
   if (!out.displayName && body.app) out.displayName = String(body.app);
   return out;
@@ -399,7 +390,7 @@ app.post("/gerar-link-sync", async (req, res) => {
 
   const v = await validateMacDetailed(macNorm, validateTemplates);
 
-  // Se NÃO for AUTO e a validação disse "invalid", encerra aqui
+  // Se NÃO for AUTO e a validação disse "invalid", encerra
   if (v.state === "invalid" && !wantAuto) {
     if (reply_to_phone || reply_to_chat) {
       await talkSend({
@@ -417,7 +408,7 @@ app.post("/gerar-link-sync", async (req, res) => {
 
   const name = String(displayName || "").slice(0, 64);
 
-  // Em AUTO: só trava no host validado se for VALID; caso contrário, tenta TODA a lista
+  // Em AUTO: só prende no host validado se a validação foi POSITIVA; senão tenta TODA a lista
   const chosenUpload =
     (wantAuto && v.state === "valid" && v.host)
       ? [`https://${v.host}/api/playlist_with_mac`]
@@ -437,12 +428,14 @@ app.post("/gerar-link-sync", async (req, res) => {
     });
   }
 
-  if (!success && wantAuto && v.state === "invalid") {
-    // Ninguém aceitou após tentar todos
-    return res.status(422).json({
+  // Em AUTO: se ninguém aceitou e a validação não foi 'valid', trate como falha de upload/infra
+  if (!success && wantAuto) {
+    return res.status(502).json({
       ok: false,
-      reason: "INVALID_MAC",
-      validate: { state: v.state, status: v.status }
+      reason: "UPLOAD_FAILED",
+      message: "Não consegui subir a playlist agora. Tente novamente.",
+      validate: { state: v.state, status: v.status },
+      upload:   { status: up.status, ok: up.ok }
     });
   }
 
@@ -516,14 +509,11 @@ app.post("/gerar-link", async (req, res) => {
         toContactId, fromChannelId, chatId: reply_to_chat, toPhone: reply_to_phone,
         message: `✅ Serviço inserido automaticamente no **${brand}**. Feche e abra o aplicativo — não precisa login.`
       });
-    } else if (!success && wantAuto && v.state === "invalid") {
-      if (reply_to_phone || reply_to_chat) {
-        await talkSend({
-          toContactId, fromChannelId, chatId: reply_to_chat, toPhone: reply_to_phone,
-          message: "⚠️ MAC inválido no provedor. Envie novamente."
-        });
-        if (TRIGGER_ON_INVALID) await triggerBotKeyword({ phone: reply_to_phone, chatId: reply_to_chat, keyword: TRIGGER_KEYWORD_INVALID });
-      }
+    } else if (!success && wantAuto) {
+      await talkSend({
+        toContactId, fromChannelId, chatId: reply_to_chat, toPhone: reply_to_phone,
+        message: "⚠️ Não consegui subir a playlist agora. Tente novamente."
+      });
     }
   })().catch(err => console.error("bg_task_error:", err?.message));
 });
