@@ -433,8 +433,8 @@ app.post("/gerar-link-sync", async (req, res) => {
   breakerReport(up.status >= 200 && up.status < 300);
   const success = up.ok && up.status === 200;
 
-const brandHost = (new URL(chosenUpload?.[0] || uploadEndpoints[0]).host).replace(/^api\./, "");
-const brand = HOST_BRAND[brandHost] || "seu app";
+  const uploadHost = new URL(chosenUpload?.[0] || uploadEndpoints[0]).host;
+  const brand = pickBrand(body?.displayName, uploadHost);
 
   if (success && (reply_to_phone || reply_to_chat)) {
     await talkSend({
