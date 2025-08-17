@@ -13,7 +13,7 @@ const TALK_ORG_ID = "aF3zZgwcLc4qDRuo";
 const TALK_FROM_PHONE = "+5573981731354";
 const authHeader = () => `Bearer ${(TALK_TOKEN || "").replace(/^Bearer\s+/i, "").trim()}`;
 
-/* ========= Defaults antigos (mantidos p/ compat) ========= */
+/* ========= Templates “legado” (fallback) ========= */
 const IPTV4K_VALIDATE_URL_TEMPLATE =
   process.env.IPTV4K_VALIDATE_URL_TEMPLATE ||
   "https://api.iptv-4k.live/api/validate_mac?mac={mac}";
@@ -24,7 +24,7 @@ const IPTV4K_UPLOAD_URL_ALT =
   process.env.IPTV4K_UPLOAD_URL_ALT ||
   "https://iptv-4k.live/api/playlist_with_mac";
 
-/* ========= M3U base (aptxu) ========= */
+/* ========= M3U base (montada sempre via user/pass) ========= */
 const M3U_BASE_DEFAULT   = process.env.M3U_BASE_DEFAULT   || "http://aptxu.com/get.php";
 const M3U_TYPE_DEFAULT   = process.env.M3U_TYPE_DEFAULT   || "m3u_plus";
 const M3U_OUTPUT_DEFAULT = process.env.M3U_OUTPUT_DEFAULT || "hls";
@@ -115,7 +115,7 @@ const BROWSER_HEADERS = {
   "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36"
 };
 
-/* ========= Multi-provedor (sem default) ========= */
+/* ========= Multi-provedor ========= */
 const PROVIDER_HOSTS = {
   "iptv 4k": "iptv-4k.live",
   "4k": "iptv-4k.live",
@@ -134,7 +134,28 @@ const PROVIDER_HOSTS = {
   "iptv next player": "iptvnext.live",
   "play iptv": "tiviplayer.io"
 };
+// exigir escolha de provedor no payload, exceto quando "auto"
 const REQUIRE_PROVIDER = (process.env.REQUIRE_PROVIDER || "true").toLowerCase() === "true";
+
+// ordem de tentativa p/ detecção automática
+const PROVIDER_ORDER = [
+  "iptv-4k.live", "simpletv.live", "iptvplayer.io", "tiviplayer.io",
+  "i-player.live", "iptvpluseplayer.live", "iptvproplayer.live",
+  "iptv-star.live", "iptvnext.live"
+];
+
+// nome bonitinho pra mensagem ao cliente
+const HOST_BRAND = {
+  "iptv-4k.live": "IPTV 4K",
+  "simpletv.live": "OttPlayer",
+  "iptvplayer.io": "IPTV Player io",
+  "tiviplayer.io": "TiviPlayer IPTV",
+  "i-player.live": "I Player",
+  "iptvpluseplayer.live": "IPTV+",
+  "iptvproplayer.live": "IPTV Pro Player",
+  "iptv-star.live": "IPTV Star Player",
+  "iptvnext.live": "IPTV Next Player"
+};
 
 function _sanitizeHost(h) {
   return String(h || "")
@@ -154,9 +175,13 @@ function _pickHostFromBody(body = {}) {
   return null; // sem default
 }
 function buildProviderEndpoints(body = {}) {
+  const wantAuto =
+    String(body.host || body.app || "").trim().toLowerCase() === "auto" ||
+    body.auto === true || body.tryAll === true;
+
   const chosenHost = _pickHostFromBody(body);
 
-  if (!chosenHost && REQUIRE_PROVIDER) {
+  if (!chosenHost && !wantAuto && REQUIRE_PROVIDER) {
     return { error: "NO_PROVIDER" };
   }
 
@@ -165,14 +190,14 @@ function buildProviderEndpoints(body = {}) {
     .map(_sanitizeHost)
     .filter(Boolean);
 
-  const hosts = chosenHost ? [chosenHost, ...fallbacks] : fallbacks;
+  const hosts = wantAuto ? PROVIDER_ORDER : (chosenHost ? [chosenHost, ...fallbacks] : fallbacks);
 
   const validateTemplates = hosts.map(h => `https://${h}/api/validate_mac?mac={mac}`);
   const uploadEndpoints   = hosts.map(h => `https://${h}/api/playlist_with_mac`);
 
   const displayName = body?.displayName || body?.name || body?.app || IPTV_UPLOAD_NAME_DEFAULT;
 
-  return { validateTemplates, uploadEndpoints, displayName, chosenHost };
+  return { validateTemplates, uploadEndpoints, displayName, chosenHost, wantAuto };
 }
 
 /* ========= uTalk ========= */
@@ -230,7 +255,7 @@ async function validateMacDetailed(mac17, validateTemplatesOpt) {
     ? validateTemplatesOpt
     : [IPTV4K_VALIDATE_URL_TEMPLATE];
 
-  let last = { state: "unknown", status: 0, snippet: "" };
+  let last = { state: "unknown", status: 0, snippet: "", host: null };
 
   for (const tpl of templates) {
     const url = fill(tpl, { mac: mac17 });
@@ -242,15 +267,16 @@ async function validateMacDetailed(mac17, validateTemplatesOpt) {
       });
       const snippet = typeof r.data === "string" ? r.data : JSON.stringify(r.data);
       const state = decideValidateState(r.status, r.data);
-      console.log("validateMac:", url, "->", state, "status:", r.status);
-      last = { state, status: r.status, snippet };
+      const host = new URL(url).host;
+      console.log("validateMac:", host, "->", state, "status:", r.status);
+      last = { state, status: r.status, snippet, host };
 
       // para no primeiro resultado conclusivo (valid/invalid) ou em 2xx/404
       if (state !== "unknown" || r.status === 404 || (r.status >= 200 && r.status < 300)) {
         return last;
       }
     } catch (e) {
-      last = { state: "unknown", status: 0, snippet: e.message };
+      last = { state: "unknown", status: 0, snippet: e.message, host: null };
     }
   }
   return last;
@@ -368,9 +394,9 @@ async function uploadPlaylistQuick({ mac, url, name, timeoutMs = 10000 }) {
   }
 }
 
-/* ========= ENDPOINT SÍNCRONO (retorna sucesso/falha) =========
- * Entrada: { mac, usuario/senha OU username/password, [reply_to], [chatId], [app|host], [displayName], [type], [output] }
- * OBS: NÃO aceita URL M3U pronta — sempre monta a partir de user/pass.
+/* ========= ENDPOINT SÍNCRONO =========
+ * Entrada: { mac, username/password (ou usuario/senha), [reply_to], [chatId], [app|host|"auto"], [displayName], [type], [output] }
+ * Não aceita URL M3U: sempre monta a partir de user+pass.
  */
 app.post("/gerar-link-sync", async (req, res) => {
   const body = normalizeWebhookKeys(req.body || {});
@@ -385,10 +411,10 @@ app.post("/gerar-link-sync", async (req, res) => {
     return res.status(400).json({
       ok: false,
       error: "NO_PROVIDER",
-      message: "Informe 'app' (ex.: OttPlayer) ou 'host' (ex.: simpletv.live) no payload."
+      message: "Informe 'app' (ex.: OttPlayer), 'host' (ex.: simpletv.live) ou use 'auto'."
     });
   }
-  const { validateTemplates, uploadEndpoints, displayName } = prov;
+  const { validateTemplates, uploadEndpoints, displayName, wantAuto } = prov;
 
   // OBRIGATÓRIO: montar M3U com user+pass
   const m3u = buildM3UFromFields({
@@ -408,9 +434,16 @@ app.post("/gerar-link-sync", async (req, res) => {
   }
 
   const name = String(displayName || "").slice(0, 64);
-  const up = await uploadPlaylist({ mac: macNorm, url: m3u, name, endpoints: uploadEndpoints });
+  const chosenUpload = (wantAuto && v.host)
+    ? [`https://${v.host}/api/playlist_with_mac`]
+    : uploadEndpoints;
+
+  const up = await uploadPlaylist({ mac: macNorm, url: m3u, name, endpoints: chosenUpload });
   breakerReport(up.status >= 200 && up.status < 300);
   const success = up.ok && up.status === 200;
+
+  const brandHost = (new URL(chosenUpload?.[0] || uploadEndpoints[0]).host);
+  const brand = HOST_BRAND[brandHost] || "seu app";
 
   let notify = { attempted: false };
   if (success && (reply_to_phone || reply_to_chat)) {
@@ -418,7 +451,7 @@ app.post("/gerar-link-sync", async (req, res) => {
       await talkSend({
         chatId: reply_to_chat,
         toPhone: reply_to_phone,
-        message: "✅ Serviço inserido automaticamente. Feche e abra o aplicativo — não precisa login."
+        message: `✅ Serviço inserido automaticamente no **${brand}**. Feche e abra o aplicativo — não precisa login.`
       });
       notify = { attempted: true };
     } catch {
@@ -429,14 +462,14 @@ app.post("/gerar-link-sync", async (req, res) => {
   return res.json({
     ok: success,
     validate: { state: v.state, status: v.status },
-    upload:   { status: up.status, ok: up.ok },
+    upload:   { status: up.status, ok: up.ok, brand },
     notify
   });
 });
 
-/* ========= ENDPOINT ASSÍNCRONO (responde ok:true) =========
- * Entrada: { mac, usuario/senha OU username/password, [reply_to], [chatId], [app|host], [displayName], [type], [output] }
- * OBS: NÃO aceita URL M3U pronta — sempre monta a partir de user/pass.
+/* ========= ENDPOINT ASSÍNCRONO =========
+ * Entrada: { mac, username/password (ou usuario/senha), [reply_to], [chatId], [app|host|"auto"], [displayName], [type], [output] }
+ * Não aceita URL M3U: sempre monta a partir de user+pass.
  */
 app.post("/gerar-link", async (req, res) => {
   const body = normalizeWebhookKeys(req.body || {});
@@ -454,10 +487,10 @@ app.post("/gerar-link", async (req, res) => {
     return res.status(400).json({
       ok: false,
       error: "NO_PROVIDER",
-      message: "Informe 'app' (ex.: OttPlayer) ou 'host' (ex.: simpletv.live) no payload."
+      message: "Informe 'app' (ex.: OttPlayer), 'host' (ex.: simpletv.live) ou use 'auto'."
     });
   }
-  const { validateTemplates, uploadEndpoints, displayName } = prov;
+  const { validateTemplates, uploadEndpoints, displayName, wantAuto } = prov;
 
   const m3u = buildM3UFromFields({
     username: body.username,
@@ -476,14 +509,21 @@ app.post("/gerar-link", async (req, res) => {
     if (v.state === "invalid") return;
     if (SAFE_MODE_STRICT && !breakerAllow()) return;
 
-    const up = await uploadPlaylist({ mac: macNorm, url: m3u, name, endpoints: uploadEndpoints });
+    const chosenUpload = (wantAuto && v.host)
+      ? [`https://${v.host}/api/playlist_with_mac`]
+      : uploadEndpoints;
+
+    const up = await uploadPlaylist({ mac: macNorm, url: m3u, name, endpoints: chosenUpload });
     breakerReport(up.ok);
 
     const success = up.ok && up.status === 200;
+    const brandHost = (new URL(chosenUpload?.[0] || uploadEndpoints[0]).host);
+    const brand = HOST_BRAND[brandHost] || "seu app";
+
     if (success && (reply_to_phone || reply_to_chat)) {
       await talkSend({
         toContactId, fromChannelId, chatId: reply_to_chat, toPhone: reply_to_phone,
-        message: "✅ Serviço inserido automaticamente. Feche e abra o aplicativo — não precisa login."
+        message: `✅ Serviço inserido automaticamente no **${brand}**. Feche e abra o aplicativo — não precisa login.`
       });
     }
   })().catch(err => console.error("bg_task_error:", err?.message));
@@ -511,9 +551,9 @@ app.post("/_probe", async (req, res) => {
   const macNorm = normalizeMac(body.mac || "");
   const prov = buildProviderEndpoints(body);
   if (prov.error === "NO_PROVIDER") {
-    return res.status(400).json({ ok: false, error: "NO_PROVIDER", message: "Informe 'app' ou 'host'." });
+    return res.status(400).json({ ok: false, error: "NO_PROVIDER", message: "Informe 'app' ou 'host' ou 'auto'." });
   }
-  const { validateTemplates, uploadEndpoints, displayName } = prov;
+  const { validateTemplates, uploadEndpoints, displayName, wantAuto } = prov;
 
   // probe também exige user+pass (sem URL direta)
   const m3u = buildM3UFromFields({
@@ -527,12 +567,19 @@ app.post("/_probe", async (req, res) => {
   if (!macNorm || !m3u) return res.status(400).json({ ok: false, error: "need mac + user/pass" });
 
   const v = await validateMacDetailed(macNorm, validateTemplates);
-  const up = await uploadPlaylist({ mac: macNorm, url: m3u, name, endpoints: uploadEndpoints });
+  const chosenUpload = (wantAuto && v.host)
+    ? [`https://${v.host}/api/playlist_with_mac`]
+    : uploadEndpoints;
+  const up = await uploadPlaylist({ mac: macNorm, url: m3u, name, endpoints: chosenUpload });
+
+  const brandHost = (new URL(chosenUpload?.[0] || uploadEndpoints[0]).host);
+  const brand = HOST_BRAND[brandHost] || "seu app";
 
   res.json({
     ok: true,
     mac: macNorm,
-    validate: { state: v.state, status: v.status, snippet: String(v.snippet || "").slice(0, 400) },
+    brand,
+    validate: { state: v.state, status: v.status, host: v.host, snippet: String(v.snippet || "").slice(0, 400) },
     upload:   { ok: up.ok, status: up.status, snippet: String(typeof up.raw === "string" ? up.raw : JSON.stringify(up.raw || {})).slice(0, 400) }
   });
 });
