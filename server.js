@@ -131,18 +131,19 @@ const HOST_BRAND = {
   "iptv-star.live": "IPTV Star Player",
   "iptvnext.live": "IPTV Next Player"
 
-  function _brandHost(h) {
+function _brandHost(h) {
   return String(h || "")
-    .replace(/^https?:\/\//i, "")
-    .replace(/\/.*$/, "")
-    .replace(/^api\./, "") // tira o "api."
+    .replace(/^https?:\/\//i, "")  // remove http(s)://
+    .replace(/\/.*$/, "")          // remove path
+    .replace(/^api\./, "")         // remove prefixo "api."
     .toLowerCase();
 }
+
 function pickBrand(displayName, host) {
   const h = _brandHost(host);
   return (displayName && String(displayName).trim())
       || HOST_BRAND[h]
-      || h.split(".")[0].toUpperCase(); // fallback simpático
+      || h.split(".")[0].toUpperCase(); // fallback
 }
 
 };
