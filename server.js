@@ -1,12 +1,19 @@
-// app.js — Koeb "mudo": sem Talk/uTalk, só status HTTP limpos
+// app.js (Koeb) — AUTO tenta todos, 404 HTML = unknown
 import express from "express";
 import axios from "axios";
 
 const app = express();
 app.use(express.json({ limit: "1mb" }));
-app.use(express.urlencoded({ extended: true })); // aceita x-www-form-urlencoded
+app.use(express.urlencoded({ extended: true }));
 
-/* ========= M3U base (montada SEMPRE via user/pass do payload) ========= */
+/* ========= uTalk ========= */
+const TALK_BASE = "https://app-utalk.umbler.com/api";
+const TALK_TOKEN = process.env.TALK_TOKEN || "MIX-2025-08-16-2093-09-04--221DC8E176B98A8DB9D7BC972F78591F45BAFCB679D88B1CC63E0CFE003A5D84";
+const TALK_ORG_ID = process.env.TALK_ORG_ID || "aF3zZgwcLc4qDRuo";
+const TALK_FROM_PHONE = process.env.TALK_FROM_PHONE || "+5573981731354";
+const authHeader = () => `Bearer ${(TALK_TOKEN || "").replace(/^Bearer\s+/i, "").trim()}`;
+
+/* ========= M3U base ========= */
 const M3U_BASE_DEFAULT   = process.env.M3U_BASE_DEFAULT   || "http://aptxu.com/get.php";
 const M3U_TYPE_DEFAULT   = process.env.M3U_TYPE_DEFAULT   || "m3u_plus";
 const M3U_OUTPUT_DEFAULT = process.env.M3U_OUTPUT_DEFAULT || "hls";
@@ -16,10 +23,10 @@ const VALIDATE_TIMEOUT_MS = parseInt(process.env.IPTV_VALIDATE_TIMEOUT || "8000"
 const UPLOAD_TIMEOUT_MS   = parseInt(process.env.IPTV_UPLOAD_TIMEOUT   || "25000", 10);
 const UPLOAD_RETRIES      = parseInt(process.env.IPTV_UPLOAD_RETRIES   || "2", 10);
 
-/* ========= Nome padrão exibido ========= */
+/* ========= Nome exibido ========= */
 const IPTV_UPLOAD_NAME_DEFAULT = process.env.IPTV_UPLOAD_NAME_DEFAULT || "MixTV";
 
-/* ========= Circuit breaker simples ========= */
+/* ========= Circuit breaker ========= */
 const SAFE_MODE_STRICT = (process.env.SAFE_MODE_STRICT || "true").toLowerCase() === "true";
 const UPLOAD_BREAKER_THRESHOLD   = parseInt(process.env.UPLOAD_BREAKER_THRESHOLD   || "3", 10);
 const UPLOAD_BREAKER_WINDOW_MS   = parseInt(process.env.UPLOAD_BREAKER_WINDOW_MS   || "60000", 10);
@@ -44,9 +51,13 @@ const PORT = parseInt(process.env.PORT || "8080", 10);
 function normalizeMac(input) {
   const hex = (String(input || "").match(/[0-9a-fA-F]/g) || []).join("").toUpperCase();
   if (hex.length !== 12) return null;
-  return hex.match(/.{1,2}/g).join(":"); // AA:BB:CC:DD:EE:FF
+  return hex.match(/.{1,2}/g).join(":");
 }
-const fill = (tpl, vars) => tpl.replace(/\{(\w+)\}/g, (_, k) => encodeURIComponent(vars[k] ?? "" ));
+const e164BR = (n) => {
+  const d = String(n || "").replace(/\D/g, "");
+  return d.startsWith("55") ? `+${d}` : `+55${d}`;
+};
+const fill = (tpl, vars) => tpl.replace(/\{(\w+)\}/g, (_, k) => encodeURIComponent(vars[k] ?? ""));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function buildM3UFromFields({ base = M3U_BASE_DEFAULT, username, password, type = M3U_TYPE_DEFAULT, output = M3U_OUTPUT_DEFAULT }) {
@@ -56,12 +67,25 @@ function buildM3UFromFields({ base = M3U_BASE_DEFAULT, username, password, type 
 }
 function normalizeWebhookKeys(body = {}) {
   const out = { ...body };
-  // credenciais (aceita variações)
+  // credenciais
   if (!out.username && body.usuario) out.username = body.usuario;
   if (!out.password && (body.senha || body.pass)) out.password = body.senha || body.pass;
 
   // MAC
   out.mac = out.mac || body.mac || body.mac_address || body.endereco_mac || body.device_mac || body.m;
+
+  // telefone
+  if (!out.reply_to && body.telefone) out.reply_to = body.telefone;
+
+  // chat IDs
+  out.chatId = out.chatId
+    || body.chatId
+    || body?.Conversa?.Id
+    || body?.Chat?.Id
+    || body?.Payload?.Chat?.Id
+    || body?.Contato?.ChatID
+    || body?.contato?.ChatID
+    || body?.chat_id;
 
   // nome exibido
   if (!out.displayName && body.servidor) out.displayName = String(body.servidor);
@@ -69,7 +93,7 @@ function normalizeWebhookKeys(body = {}) {
   return out;
 }
 
-/* ========= Headers estilo “site” ========= */
+/* ========= Headers ========= */
 const BROWSER_HEADERS = {
   accept: "application/json",
   "accept-language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
@@ -146,19 +170,66 @@ function buildProviderEndpoints(body = {}) {
 
   const hosts = wantAuto ? PROVIDER_ORDER : (chosenHost ? [chosenHost, ...fallbacks] : fallbacks);
 
-  const validateTemplates = hosts.map(h => `https://${h}/api/validate_mac?mac={mac}`);
-  const uploadEndpoints   = hosts.map(h => `https://${h}/api/playlist_with_mac`);
+  // EXPANSÃO: bare e api.<bare>
+  const expandHosts = (arr) => {
+    const out = [];
+    for (const h0 of arr) {
+      const bare = String(h0).replace(/^https?:\/\//,'').replace(/^api\./,'').toLowerCase();
+      const api  = `api.${bare}`;
+      if (!out.includes(bare)) out.push(bare);
+      if (!out.includes(api))  out.push(api);
+    }
+    return out;
+  };
+  const allHosts = expandHosts(hosts);
+
+  const validateTemplates = allHosts.map(h => `https://${h}/api/validate_mac?mac={mac}`);
+  const uploadEndpoints   = allHosts.map(h => `https://${h}/api/playlist_with_mac`);
 
   const displayName = body?.displayName || body?.name || body?.app || IPTV_UPLOAD_NAME_DEFAULT;
 
   return { validateTemplates, uploadEndpoints, displayName, chosenHost, wantAuto };
 }
 
+/* ========= uTalk ========= */
+async function talkSend({ toContactId, fromChannelId, chatId, toPhone, message }) {
+  if (!TALK_TOKEN) { console.error("talkSend: faltando TALK_API_TOKEN"); return; }
+
+  const base = { OrganizationId: TALK_ORG_ID, Message: message };
+
+  let body = null;
+  if (toContactId || fromChannelId) {
+    body = { ...base, FromPhone: TALK_FROM_PHONE };
+    if (toContactId)   body.ToContactId   = toContactId;
+    if (fromChannelId) body.FromChannelId = fromChannelId;
+  } else if (chatId) {
+    body = { ...base, ChatId: chatId, FromPhone: TALK_FROM_PHONE };
+  } else if (toPhone) {
+    body = { ...base, ToPhone: e164BR(toPhone), FromPhone: TALK_FROM_PHONE };
+  }
+  if (!body) { console.warn("talkSend: sem destino (id/chat/phone)"); return; }
+
+  try {
+    const r = await axios.post(`${TALK_BASE}/v1/messages/simplified`, body,
+      { headers: { Authorization: authHeader(), "Content-Type": "application/json", Accept: "application/json" },
+        timeout: 15000, validateStatus: () => true });
+    if (r.status >= 200 && r.status < 300) { console.log("talkSend OK ->", r.status); return; }
+    const errTxt = typeof r.data === "string" ? r.data : JSON.stringify(r.data || {});
+    throw new Error(`send failed: ${r.status} ${errTxt.slice(0,300)}`);
+  } catch (e) {
+    const st = e?.response?.status, bd = e?.response?.data;
+    console.warn("uTalk erro:", st ?? "-", typeof bd === "string" ? bd : JSON.stringify(bd || e.message));
+  }
+}
+
 /* ========= Validação MAC ========= */
 function decideValidateState(status, data) {
-  if (status === 404) return "invalid";
+  if (status === 404) {
+    const txt404 = typeof data === "string" ? data : JSON.stringify(data || "");
+    if (/<!doctype|<html/i.test(txt404)) return "unknown"; // 404 HTML → não conclusivo
+    return "invalid";
+  }
   const txt = typeof data === "string" ? data : JSON.stringify(data || "");
-  if (status === 500 && /"mac"\s*length\s*must\s*be\s*17/i.test(txt)) return "invalid";
   if (status >= 200 && status < 300) {
     if (/<!doctype|<html/i.test(txt)) return "unknown";
     if (data && data.error === false && (data?.message?.mac || data?.message?.id)) return "valid";
@@ -193,9 +264,9 @@ async function validateMacDetailed(mac17, validateTemplatesOpt) {
       const host = new URL(url).host;
       console.log("validateMac:", host, "->", state, "status:", r.status);
       last = { state, status: r.status, snippet, host };
-      if (state !== "unknown" || r.status === 404 || (r.status >= 200 && r.status < 300)) {
-        return last;
-      }
+      // só retorna cedo se encontrou "valid"
+      if (state === "valid") return last;
+      // invalid/unknown → continue tentando outros hosts
     } catch (e) {
       last = { state: "unknown", status: 0, snippet: e.message, host: null };
     }
@@ -292,10 +363,22 @@ async function uploadPlaylist({ mac, url, name, endpoints }) {
   return last;
 }
 
-/* ========= /gerar-link-sync (síncrono) ========= */
+/* ========= Trigger inválido ========= */
+const TRIGGER_ON_INVALID = (process.env.TRIGGER_ON_INVALID || "true").toLowerCase() === "true";
+const TRIGGER_KEYWORD_INVALID = process.env.TRIGGER_KEYWORD_INVALID || "#corrigir-mac";
+const TRIGGER_DELAY_MS = parseInt(process.env.TRIGGER_DELAY_MS || "600", 10);
+async function triggerBotKeyword({ phone, chatId, keyword }) {
+  if (!keyword || (!phone && !chatId)) return;
+  await new Promise(r => setTimeout(r, TRIGGER_DELAY_MS));
+  await talkSend({ toPhone: phone, chatId, message: keyword });
+}
+
+/* ========= /gerar-link-sync ========= */
 app.post("/gerar-link-sync", async (req, res) => {
   const body = normalizeWebhookKeys(req.body || {});
   const macNorm = normalizeMac(body.mac);
+  const reply_to_phone = body.reply_to;
+  const reply_to_chat  = body.chatId;
 
   if (!macNorm) return res.status(400).json({ ok: false, error: "NO_MAC" });
 
@@ -312,26 +395,33 @@ app.post("/gerar-link-sync", async (req, res) => {
     username: body.username, password: body.password,
     type: body?.type || M3U_TYPE_DEFAULT, output: body?.output || M3U_OUTPUT_DEFAULT
   });
-  if (!m3u) {
-    return res.status(422).json({ ok: false, error: "NO_M3U", message: "Credenciais ausentes para montar a M3U." });
-  }
+  if (!m3u) return res.status(400).json({ ok: false, error: "NO_M3U", message: "Credenciais ausentes para montar a M3U." });
 
   const v = await validateMacDetailed(macNorm, validateTemplates);
-  if (v.state === "invalid") {
-    return res.status(422).json({
-      ok: false,
-      reason: "INVALID_MAC",
-      validate: { state: v.state, status: v.status }
-    });
+
+  // Se NÃO for AUTO e a validação disse "invalid", encerra aqui
+  if (v.state === "invalid" && !wantAuto) {
+    if (reply_to_phone || reply_to_chat) {
+      await talkSend({
+        chatId: reply_to_chat, toPhone: reply_to_phone,
+        message: "⚠️ MAC inválido. Digite novamente (12 caracteres; com “:” ou sem)."
+      });
+      if (TRIGGER_ON_INVALID) await triggerBotKeyword({ phone: reply_to_phone, chatId: reply_to_chat, keyword: TRIGGER_KEYWORD_INVALID });
+    }
+    return res.status(422).json({ ok: false, reason: "INVALID_MAC", validate: { state: v.state, status: v.status } });
   }
+
   if (SAFE_MODE_STRICT && !breakerAllow()) {
     return res.status(503).json({ ok: false, reason: "BREAKER_OPEN" });
   }
 
   const name = String(displayName || "").slice(0, 64);
-  const chosenUpload = (wantAuto && v.host)
-    ? [`https://${v.host}/api/playlist_with_mac`]
-    : uploadEndpoints;
+
+  // Em AUTO: só trava no host validado se for VALID; caso contrário, tenta TODA a lista
+  const chosenUpload =
+    (wantAuto && v.state === "valid" && v.host)
+      ? [`https://${v.host}/api/playlist_with_mac`]
+      : uploadEndpoints;
 
   const up = await uploadPlaylist({ mac: macNorm, url: m3u, name, endpoints: chosenUpload });
   breakerReport(up.status >= 200 && up.status < 300);
@@ -340,25 +430,39 @@ app.post("/gerar-link-sync", async (req, res) => {
   const brandHost = (new URL(chosenUpload?.[0] || uploadEndpoints[0]).host);
   const brand = HOST_BRAND[brandHost] || "seu app";
 
-  if (!success) {
-    return res.status(502).json({
-      ok: false,
-      validate: { state: v.state, status: v.status },
-      upload:   { status: up.status, ok: up.ok, brand }
+  if (success && (reply_to_phone || reply_to_chat)) {
+    await talkSend({
+      chatId: reply_to_chat, toPhone: reply_to_phone,
+      message: `✅ Serviço inserido automaticamente no **${brand}**. Feche e abra o aplicativo — não precisa login.`
     });
   }
 
-  return res.status(200).json({
-    ok: true,
+  if (!success && wantAuto && v.state === "invalid") {
+    // Ninguém aceitou após tentar todos
+    return res.status(422).json({
+      ok: false,
+      reason: "INVALID_MAC",
+      validate: { state: v.state, status: v.status }
+    });
+  }
+
+  return res.json({
+    ok: success,
     validate: { state: v.state, status: v.status },
     upload:   { status: up.status, ok: up.ok, brand }
   });
 });
 
-/* ========= /gerar-link (assíncrono, opcional) ========= */
+/* ========= /gerar-link (assíncrono) ========= */
 app.post("/gerar-link", async (req, res) => {
   const body = normalizeWebhookKeys(req.body || {});
   const macNorm = normalizeMac(body.mac);
+
+  const reply_to_phone = body.reply_to;
+  const reply_to_chat  = body.chatId;
+  const toContactId    = body.toContactId || body.contatoId || body.contactId;
+  const fromChannelId  = body.fromChannelId || body.canalId || body.channelId;
+
   if (!macNorm)  return res.status(400).json({ ok: false, error: "NO_MAC" });
 
   const prov = buildProviderEndpoints(body);
@@ -374,28 +478,73 @@ app.post("/gerar-link", async (req, res) => {
     username: body.username, password: body.password,
     type: body?.type || M3U_TYPE_DEFAULT, output: body?.output || M3U_OUTPUT_DEFAULT
   });
-  if (!m3u) return res.status(422).json({ ok: false, error: "NO_M3U", message: "Credenciais ausentes para montar a M3U." });
+  if (!m3u) return res.status(400).json({ ok: false, error: "NO_M3U", message: "Credenciais ausentes para montar a M3U." });
 
-  // retorna logo e processa em bg (não envia mensagens)
-  res.status(202).json({ ok: true });
+  res.json({ ok: true });
 
   (async () => {
     const v = await validateMacDetailed(macNorm, validateTemplates);
-    if (v.state === "invalid") return;
+    const name = String(displayName || "").slice(0, 64);
+
+    // Se NÃO for AUTO e inválido, encerra
+    if (v.state === "invalid" && !wantAuto) {
+      if (reply_to_phone || reply_to_chat) {
+        await talkSend({
+          toContactId, fromChannelId, chatId: reply_to_chat, toPhone: reply_to_phone,
+          message: "⚠️ MAC inválido. Digite novamente (12 caracteres; com “:” ou sem)."
+        });
+        if (TRIGGER_ON_INVALID) await triggerBotKeyword({ phone: reply_to_phone, chatId: reply_to_chat, keyword: TRIGGER_KEYWORD_INVALID });
+      }
+      return;
+    }
     if (SAFE_MODE_STRICT && !breakerAllow()) return;
 
-    const name = String(displayName || "").slice(0, 64);
-    const chosenUpload = (wantAuto && v.host)
-      ? [`https://${v.host}/api/playlist_with_mac`]
-      : uploadEndpoints;
+    const chosenUpload =
+      (wantAuto && v.state === "valid" && v.host)
+        ? [`https://${v.host}/api/playlist_with_mac`]
+        : uploadEndpoints;
 
     const up = await uploadPlaylist({ mac: macNorm, url: m3u, name, endpoints: chosenUpload });
     breakerReport(up.ok);
-    // silêncio: sem Talk/uTalk aqui
+
+    const success = up.ok && up.status === 200;
+    const brandHost = (new URL(chosenUpload?.[0] || uploadEndpoints[0]).host);
+    const brand = HOST_BRAND[brandHost] || "seu app";
+
+    if (success && (reply_to_phone || reply_to_chat)) {
+      await talkSend({
+        toContactId, fromChannelId, chatId: reply_to_chat, toPhone: reply_to_phone,
+        message: `✅ Serviço inserido automaticamente no **${brand}**. Feche e abra o aplicativo — não precisa login.`
+      });
+    } else if (!success && wantAuto && v.state === "invalid") {
+      if (reply_to_phone || reply_to_chat) {
+        await talkSend({
+          toContactId, fromChannelId, chatId: reply_to_chat, toPhone: reply_to_phone,
+          message: "⚠️ MAC inválido no provedor. Envie novamente."
+        });
+        if (TRIGGER_ON_INVALID) await triggerBotKeyword({ phone: reply_to_phone, chatId: reply_to_chat, keyword: TRIGGER_KEYWORD_INVALID });
+      }
+    }
   })().catch(err => console.error("bg_task_error:", err?.message));
 });
 
 /* ========= Utilitários ========= */
+app.post("/_talk", async (req, res) => {
+  try {
+    const msg = req.body.message || "✅ Teste de envio (server)";
+    await talkSend({
+      toContactId: req.body.toContactId,
+      fromChannelId: req.body.fromChannelId,
+      chatId: req.body.chatId,
+      toPhone: req.body.to,
+      message: msg
+    });
+    res.json({ ok: true });
+  } catch {
+    res.status(500).json({ ok: false });
+  }
+});
+
 app.post("/_probe", async (req, res) => {
   const body = normalizeWebhookKeys(req.body || {});
   const macNorm = normalizeMac(body.mac || "");
@@ -414,9 +563,12 @@ app.post("/_probe", async (req, res) => {
   if (!macNorm || !m3u) return res.status(400).json({ ok: false, error: "need mac + user/pass" });
 
   const v = await validateMacDetailed(macNorm, validateTemplates);
-  const chosenUpload = (wantAuto && v.host)
-    ? [`https://${v.host}/api/playlist_with_mac`]
-    : uploadEndpoints;
+
+  const chosenUpload =
+    (wantAuto && v.state === "valid" && v.host)
+      ? [`https://${v.host}/api/playlist_with_mac`]
+      : uploadEndpoints;
+
   const up = await uploadPlaylist({ mac: macNorm, url: m3u, name, endpoints: chosenUpload });
 
   const brandHost = (new URL(chosenUpload?.[0] || uploadEndpoints[0]).host);
@@ -432,8 +584,39 @@ app.post("/_probe", async (req, res) => {
 });
 
 app.get("/_healthz", (_, res) => res.json({ ok: true }));
-app.get("/_readyz",  (_, res) => res.json({ ok: true, missing: [] }));
-app.get("/health",   (_, res) => res.json({ ok: true }));
+app.get("/_readyz",  (_, res) => {
+  const missing = [];
+  if (!TALK_ORG_ID) missing.push("TALK_ORG_ID");
+  if (!TALK_FROM_PHONE) missing.push("TALK_FROM_PHONE");
+  if (!TALK_TOKEN) missing.push("TALK_API_TOKEN (apenas necessário para enviar WhatsApp)");
+  res.json({ ok: missing.length === 0, missing });
+});
+app.get("/health", (_, res) => res.json({ ok: true }));
+
+app.get("/_utalk_whoami", async (req, res) => {
+  try {
+    const r = await axios.get(`${TALK_BASE}/v1/member/me`, {
+      headers: { Authorization: authHeader(), Accept: "application/json" },
+      timeout: 10000, validateStatus: () => true
+    });
+    res.json({
+      status: r.status,
+      token_len: (TALK_TOKEN||"").length,
+      token_prefix: (TALK_TOKEN||"").slice(0,8),
+      token_suffix: (TALK_TOKEN||"").slice(-8),
+      org: TALK_ORG_ID,
+      from: TALK_FROM_PHONE
+    });
+  } catch (e) { res.status(500).json({ ok:false, err: e.message }); }
+});
+
+/* ========= JSON inválido (resposta amigável) ========= */
+app.use((err, req, res, next) => {
+  if (err?.type === "entity.parse.failed") {
+    return res.status(400).json({ ok:false, error:"INVALID_JSON", message:"Body não é JSON válido." });
+  }
+  next(err);
+});
 
 /* ========= Start ========= */
 app.listen(PORT, () => console.log(`ON :${PORT}`));
