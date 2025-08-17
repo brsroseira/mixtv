@@ -13,7 +13,7 @@ const TALK_ORG_ID = "aF3zZgwcLc4qDRuo";
 const TALK_FROM_PHONE = "+5573981731354";
 const authHeader = () => `Bearer ${(TALK_TOKEN || "").replace(/^Bearer\s+/i, "").trim()}`;
 
-/* ========= IPTV (defaults) ========= */
+/* ========= Defaults antigos (mantidos p/ compat) ========= */
 const IPTV4K_VALIDATE_URL_TEMPLATE =
   process.env.IPTV4K_VALIDATE_URL_TEMPLATE ||
   "https://api.iptv-4k.live/api/validate_mac?mac={mac}";
@@ -24,18 +24,18 @@ const IPTV4K_UPLOAD_URL_ALT =
   process.env.IPTV4K_UPLOAD_URL_ALT ||
   "https://iptv-4k.live/api/playlist_with_mac";
 
-/* ========= M3U fixo (aptxu) ========= */
+/* ========= M3U base (aptxu) ========= */
 const M3U_BASE_DEFAULT   = process.env.M3U_BASE_DEFAULT   || "http://aptxu.com/get.php";
 const M3U_TYPE_DEFAULT   = process.env.M3U_TYPE_DEFAULT   || "m3u_plus";
 const M3U_OUTPUT_DEFAULT = process.env.M3U_OUTPUT_DEFAULT || "hls";
 
 /* ========= Timeouts/Retry ========= */
-const VALIDATE_TIMEOUT_MS = parseInt(process.env.IPTV4K_VALIDATE_TIMEOUT || "8000", 10);
-const UPLOAD_TIMEOUT_MS   = parseInt(process.env.IPTV4K_UPLOAD_TIMEOUT   || "25000", 10);
-const UPLOAD_RETRIES      = parseInt(process.env.IPTV4K_UPLOAD_RETRIES   || "2", 10);
+const VALIDATE_TIMEOUT_MS = parseInt(process.env.IPTV_VALIDATE_TIMEOUT || "8000", 10);
+const UPLOAD_TIMEOUT_MS   = parseInt(process.env.IPTV_UPLOAD_TIMEOUT   || "25000", 10);
+const UPLOAD_RETRIES      = parseInt(process.env.IPTV_UPLOAD_RETRIES   || "2", 10);
 
-/* ========= Nome padrão no 4K ========= */
-const IPTV4K_UPLOAD_NAME_DEFAULT = process.env.IPTV4K_UPLOAD_NAME_DEFAULT || "MixTV";
+/* ========= Nome padrão exibido ========= */
+const IPTV_UPLOAD_NAME_DEFAULT = process.env.IPTV_UPLOAD_NAME_DEFAULT || "MixTV";
 
 /* ========= Circuit breaker simples ========= */
 const SAFE_MODE_STRICT = (process.env.SAFE_MODE_STRICT || "true").toLowerCase() === "true";
@@ -76,24 +76,13 @@ function buildM3UFromFields({ base = M3U_BASE_DEFAULT, username, password, type 
   const qs = new URLSearchParams({ username, password, type, output });
   return `${base}?${qs.toString()}`;
 }
-function decodeM3U(body) {
-  if (body?.m3uUrl)    return String(body.m3uUrl);
-  if (body?.m3uUrl_b64) { try { return Buffer.from(String(body.m3uUrl_b64), "base64").toString("utf8"); } catch {} }
-  if (body?.m3uUrl_enc) { try { return decodeURIComponent(String(body.m3uUrl_enc)); } catch {} }
-  for (const k of ["url", "m3u", "playlist"]) {
-    if (body?.[k] && /^https?:\/\//i.test(String(body[k]))) return String(body[k]);
-    if (body?.[`${k}_enc`]) { try { return decodeURIComponent(String(body[`${k}_enc`])); } catch {} }
-    if (body?.[`${k}_b64`]) { try { return Buffer.from(String(body[`${k}_b64`]), "base64").toString("utf8"); } catch {} }
-  }
-  return null;
-}
 function normalizeWebhookKeys(body = {}) {
   const out = { ...body };
-  // credenciais
+  // credenciais: o Worker/Sigma manda para cá
   if (!out.username && body.usuario) out.username = body.usuario;
   if (!out.password && (body.senha || body.pass)) out.password = body.senha || body.pass;
 
-  // MAC possíveis
+  // MAC
   out.mac = out.mac || body.mac || body.mac_address || body.endereco_mac || body.device_mac || body.m;
 
   // telefone opcional
@@ -126,10 +115,7 @@ const BROWSER_HEADERS = {
   "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36"
 };
 
-/* ========= Multi-provedor ========= */
-const PROVIDER_HOST_DEFAULT =
-  (process.env.UPLOAD_HOST_DEFAULT || "iptv-4k.live").toLowerCase();
-
+/* ========= Multi-provedor (sem default) ========= */
 const PROVIDER_HOSTS = {
   "iptv 4k": "iptv-4k.live",
   "4k": "iptv-4k.live",
@@ -148,6 +134,7 @@ const PROVIDER_HOSTS = {
   "iptv next player": "iptvnext.live",
   "play iptv": "tiviplayer.io"
 };
+const REQUIRE_PROVIDER = (process.env.REQUIRE_PROVIDER || "true").toLowerCase() === "true";
 
 function _sanitizeHost(h) {
   return String(h || "")
@@ -155,43 +142,43 @@ function _sanitizeHost(h) {
     .replace(/\/.*$/, "")
     .toLowerCase();
 }
+function _mapAppToHost(appLike = "") {
+  const key = String(appLike).trim().toLowerCase();
+  return key && PROVIDER_HOSTS[key] ? PROVIDER_HOSTS[key] : null;
+}
 function _pickHostFromBody(body = {}) {
   const explicit = body.host || body.uploadHost || body.domain || body.appDomain;
   if (explicit) return _sanitizeHost(explicit);
-
-  const key = String(body.app || body.servidor || body.provider || body.brand || "")
-    .trim()
-    .toLowerCase();
-  if (key && PROVIDER_HOSTS[key]) return PROVIDER_HOSTS[key];
-
-  return PROVIDER_HOST_DEFAULT;
+  const mapped = _mapAppToHost(body.app || body.servidor || body.provider || body.brand);
+  if (mapped) return mapped;
+  return null; // sem default
 }
 function buildProviderEndpoints(body = {}) {
-  const main = _pickHostFromBody(body);
+  const chosenHost = _pickHostFromBody(body);
+
+  if (!chosenHost && REQUIRE_PROVIDER) {
+    return { error: "NO_PROVIDER" };
+  }
+
   const fallbacks = (process.env.UPLOAD_HOST_FALLBACKS || "")
     .split(",")
     .map(_sanitizeHost)
     .filter(Boolean);
-  const hosts = [main, ...fallbacks];
 
-  const validateTemplates = hosts.map(
-    (h) => `https://${h}/api/validate_mac?mac={mac}`
-  );
-  const uploadEndpoints = hosts.map(
-    (h) => `https://${h}/api/playlist_with_mac`
-  );
+  const hosts = chosenHost ? [chosenHost, ...fallbacks] : fallbacks;
 
-  const displayName =
-    body?.displayName || body?.name || body?.app || IPTV4K_UPLOAD_NAME_DEFAULT;
+  const validateTemplates = hosts.map(h => `https://${h}/api/validate_mac?mac={mac}`);
+  const uploadEndpoints   = hosts.map(h => `https://${h}/api/playlist_with_mac`);
 
-  return { validateTemplates, uploadEndpoints, displayName };
+  const displayName = body?.displayName || body?.name || body?.app || IPTV_UPLOAD_NAME_DEFAULT;
+
+  return { validateTemplates, uploadEndpoints, displayName, chosenHost };
 }
 
 /* ========= uTalk ========= */
 async function talkSend({ toContactId, fromChannelId, chatId, toPhone, message }) {
   if (!TALK_TOKEN) { console.error("talkSend: faltando TALK_API_TOKEN"); return; }
 
-  // uTalk pede TitleCase
   const base = { OrganizationId: TALK_ORG_ID, Message: message };
 
   let body = null;
@@ -207,10 +194,9 @@ async function talkSend({ toContactId, fromChannelId, chatId, toPhone, message }
   if (!body) { console.warn("talkSend: sem destino (id/chat/phone)"); return; }
 
   try {
-    const r = await axios.post(`${TALK_BASE}/v1/messages/simplified`, body, {
-      headers: { Authorization: authHeader(), "Content-Type": "application/json", Accept: "application/json" },
-      timeout: 15000, validateStatus: () => true
-    });
+    const r = await axios.post(`${TALK_BASE}/v1/messages/simplified`, body,
+      { headers: { Authorization: authHeader(), "Content-Type": "application/json", Accept: "application/json" },
+        timeout: 15000, validateStatus: () => true });
     if (r.status >= 200 && r.status < 300) { console.log("talkSend OK ->", r.status); return; }
     const errTxt = typeof r.data === "string" ? r.data : JSON.stringify(r.data || {});
     throw new Error(`send failed: ${r.status} ${errTxt.slice(0,300)}`);
@@ -220,7 +206,7 @@ async function talkSend({ toContactId, fromChannelId, chatId, toPhone, message }
   }
 }
 
-/* ========= 4K IPTV: validação ========= */
+/* ========= Validação MAC ========= */
 function decideValidateState(status, data) {
   if (status === 404) return "invalid";
   const txt = typeof data === "string" ? data : JSON.stringify(data || "");
@@ -239,7 +225,6 @@ function decideValidateState(status, data) {
   }
   return "unknown";
 }
-
 async function validateMacDetailed(mac17, validateTemplatesOpt) {
   const templates = (validateTemplatesOpt && validateTemplatesOpt.length)
     ? validateTemplatesOpt
@@ -260,6 +245,7 @@ async function validateMacDetailed(mac17, validateTemplatesOpt) {
       console.log("validateMac:", url, "->", state, "status:", r.status);
       last = { state, status: r.status, snippet };
 
+      // para no primeiro resultado conclusivo (valid/invalid) ou em 2xx/404
       if (state !== "unknown" || r.status === 404 || (r.status >= 200 && r.status < 300)) {
         return last;
       }
@@ -269,7 +255,6 @@ async function validateMacDetailed(mac17, validateTemplatesOpt) {
   }
   return last;
 }
-
 async function validateMacQuick(mac17, timeoutMs = 5000) {
   const url = fill(IPTV4K_VALIDATE_URL_TEMPLATE, { mac: mac17 });
   try {
@@ -383,7 +368,10 @@ async function uploadPlaylistQuick({ mac, url, name, timeoutMs = 10000 }) {
   }
 }
 
-/* ========= ENDPOINT SÍNCRONO ========= */
+/* ========= ENDPOINT SÍNCRONO (retorna sucesso/falha) =========
+ * Entrada: { mac, usuario/senha OU username/password, [reply_to], [chatId], [app|host], [displayName], [type], [output] }
+ * OBS: NÃO aceita URL M3U pronta — sempre monta a partir de user/pass.
+ */
 app.post("/gerar-link-sync", async (req, res) => {
   const body = normalizeWebhookKeys(req.body || {});
   const macNorm = normalizeMac(body.mac);
@@ -392,17 +380,25 @@ app.post("/gerar-link-sync", async (req, res) => {
 
   if (!macNorm) return res.status(400).json({ ok: false, error: "NO_MAC" });
 
-  const userM3U = (body.username && body.password)
-    ? buildM3UFromFields({
-        username: body.username,
-        password: body.password,
-        type: body?.type || M3U_TYPE_DEFAULT,
-        output: body?.output || M3U_OUTPUT_DEFAULT
-      })
-    : null;
-  if (!userM3U) return res.status(400).json({ ok: false, error: "NO_M3U" });
+  const prov = buildProviderEndpoints(body);
+  if (prov.error === "NO_PROVIDER") {
+    return res.status(400).json({
+      ok: false,
+      error: "NO_PROVIDER",
+      message: "Informe 'app' (ex.: OttPlayer) ou 'host' (ex.: simpletv.live) no payload."
+    });
+  }
+  const { validateTemplates, uploadEndpoints, displayName } = prov;
 
-  const { validateTemplates, uploadEndpoints, displayName } = buildProviderEndpoints(body);
+  // OBRIGATÓRIO: montar M3U com user+pass
+  const m3u = buildM3UFromFields({
+    username: body.username,
+    password: body.password,
+    type: body?.type || M3U_TYPE_DEFAULT,
+    output: body?.output || M3U_OUTPUT_DEFAULT
+  });
+  if (!m3u) return res.status(400).json({ ok: false, error: "NO_M3U", message: "Credenciais ausentes para montar a M3U." });
+
   const v = await validateMacDetailed(macNorm, validateTemplates);
   if (v.state === "invalid") {
     return res.json({ ok: false, reason: "INVALID_MAC", validate: { state: v.state, status: v.status } });
@@ -412,7 +408,7 @@ app.post("/gerar-link-sync", async (req, res) => {
   }
 
   const name = String(displayName || "").slice(0, 64);
-  const up = await uploadPlaylist({ mac: macNorm, url: userM3U, name, endpoints: uploadEndpoints });
+  const up = await uploadPlaylist({ mac: macNorm, url: m3u, name, endpoints: uploadEndpoints });
   breakerReport(up.status >= 200 && up.status < 300);
   const success = up.ok && up.status === 200;
 
@@ -438,7 +434,10 @@ app.post("/gerar-link-sync", async (req, res) => {
   });
 });
 
-/* ========= ENDPOINT ASSÍNCRONO ========= */
+/* ========= ENDPOINT ASSÍNCRONO (responde ok:true) =========
+ * Entrada: { mac, usuario/senha OU username/password, [reply_to], [chatId], [app|host], [displayName], [type], [output] }
+ * OBS: NÃO aceita URL M3U pronta — sempre monta a partir de user/pass.
+ */
 app.post("/gerar-link", async (req, res) => {
   const body = normalizeWebhookKeys(req.body || {});
   const macNorm = normalizeMac(body.mac);
@@ -450,23 +449,34 @@ app.post("/gerar-link", async (req, res) => {
 
   if (!macNorm)  return res.status(400).json({ ok: false, error: "NO_MAC" });
 
-  const userM3U = (body.username && body.password)
-    ? buildM3UFromFields({ username: body.username, password: body.password, type: body?.type || M3U_TYPE_DEFAULT, output: body?.output || M3U_OUTPUT_DEFAULT })
-    : null;
+  const prov = buildProviderEndpoints(body);
+  if (prov.error === "NO_PROVIDER") {
+    return res.status(400).json({
+      ok: false,
+      error: "NO_PROVIDER",
+      message: "Informe 'app' (ex.: OttPlayer) ou 'host' (ex.: simpletv.live) no payload."
+    });
+  }
+  const { validateTemplates, uploadEndpoints, displayName } = prov;
 
-  if (!userM3U) return res.status(400).json({ ok: false, error: "NO_M3U" });
+  const m3u = buildM3UFromFields({
+    username: body.username,
+    password: body.password,
+    type: body?.type || M3U_TYPE_DEFAULT,
+    output: body?.output || M3U_OUTPUT_DEFAULT
+  });
+  if (!m3u) return res.status(400).json({ ok: false, error: "NO_M3U", message: "Credenciais ausentes para montar a M3U." });
 
   res.json({ ok: true });
 
   (async () => {
-    const { validateTemplates, uploadEndpoints, displayName } = buildProviderEndpoints(body);
     const v = await validateMacDetailed(macNorm, validateTemplates);
     const name = String(displayName || "").slice(0, 64);
 
     if (v.state === "invalid") return;
     if (SAFE_MODE_STRICT && !breakerAllow()) return;
 
-    const up = await uploadPlaylist({ mac: macNorm, url: userM3U, name, endpoints: uploadEndpoints });
+    const up = await uploadPlaylist({ mac: macNorm, url: m3u, name, endpoints: uploadEndpoints });
     breakerReport(up.ok);
 
     const success = up.ok && up.status === 200;
@@ -499,13 +509,22 @@ app.post("/_talk", async (req, res) => {
 app.post("/_probe", async (req, res) => {
   const body = normalizeWebhookKeys(req.body || {});
   const macNorm = normalizeMac(body.mac || "");
-  const m3u = (body?.username && body?.password)
-    ? buildM3UFromFields({ username: body.username, password: body.password, type: body?.type || M3U_TYPE_DEFAULT, output: body?.output || M3U_OUTPUT_DEFAULT })
-    : (decodeM3U(body) || body.url);
-  const { validateTemplates, uploadEndpoints, displayName } = buildProviderEndpoints(body);
+  const prov = buildProviderEndpoints(body);
+  if (prov.error === "NO_PROVIDER") {
+    return res.status(400).json({ ok: false, error: "NO_PROVIDER", message: "Informe 'app' ou 'host'." });
+  }
+  const { validateTemplates, uploadEndpoints, displayName } = prov;
+
+  // probe também exige user+pass (sem URL direta)
+  const m3u = buildM3UFromFields({
+    username: body.username,
+    password: body.password,
+    type: body?.type || M3U_TYPE_DEFAULT,
+    output: body?.output || M3U_OUTPUT_DEFAULT
+  });
   const name = String(displayName || "").slice(0, 64);
 
-  if (!macNorm || !m3u) return res.status(400).json({ ok: false, error: "need mac + m3u/url" });
+  if (!macNorm || !m3u) return res.status(400).json({ ok: false, error: "need mac + user/pass" });
 
   const v = await validateMacDetailed(macNorm, validateTemplates);
   const up = await uploadPlaylist({ mac: macNorm, url: m3u, name, endpoints: uploadEndpoints });
@@ -528,7 +547,6 @@ app.get("/_readyz",  (_, res) => {
 });
 app.get("/health", (_, res) => res.json({ ok: true }));
 
-/* ========= whoami ========= */
 app.get("/_utalk_whoami", async (req, res) => {
   try {
     const r = await axios.get(`${TALK_BASE}/v1/member/me`, {
