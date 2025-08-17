@@ -1,4 +1,6 @@
-// app.js (Koeb) — AUTO tenta todos, 404 HTML = unknown
+// app.js (Koeb) — AUTO tenta todos, 404 HTML = "unknown" (continua tentando)
+// Node 18+
+
 import express from "express";
 import axios from "axios";
 
@@ -84,15 +86,22 @@ function normalizeWebhookKeys(body = {}) {
   return out;
 }
 
-/* ========= Headers ========= */
-const BROWSER_HEADERS = {
+/* ========= Headers base + headers por host ========= */
+const BROWSER_HEADERS_BASE = {
   accept: "application/json",
   "accept-language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
   "cache-control": "no-cache",
-  origin: "https://iptv-4k.live",
   pragma: "no-cache",
-  referer: "https://iptv-4k.live/",
   "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36"
+};
+const pureHost = (h) => String(h || "").replace(/^https?:\/\//i, "").replace(/\/.*$/, "").toLowerCase().replace(/^api\./, "");
+const headersFor = (host) => {
+  const baseHost = pureHost(host);
+  return {
+    ...BROWSER_HEADERS_BASE,
+    origin: `https://${baseHost}`,
+    referer: `https://${baseHost}/`
+  };
 };
 
 /* ========= Multi-provedor ========= */
@@ -134,20 +143,18 @@ const HOST_BRAND = {
   "iptvnext.live": "IPTV Next Player"
 };
 
-// >>> estas funções ficam FORA do objeto <<<
 function _brandHost(h) {
   return String(h || "")
-    .replace(/^https?:\/\//i, "")  // remove http(s)://
-    .replace(/\/.*$/, "")          // remove path
-    .replace(/^api\./, "")         // remove prefixo "api."
+    .replace(/^https?:\/\//i, "")
+    .replace(/\/.*$/, "")
+    .replace(/^api\./, "")
     .toLowerCase();
 }
-
 function pickBrand(displayName, host) {
   const h = _brandHost(host);
   return (displayName && String(displayName).trim())
       || HOST_BRAND[h]
-      || h.split(".")[0].toUpperCase(); // fallback simpático
+      || h.split(".")[0].toUpperCase();
 }
 
 function _sanitizeHost(h) {
@@ -254,6 +261,7 @@ function decideValidateState(status, data) {
   }
   return "unknown";
 }
+
 async function validateMacDetailed(mac17, validateTemplatesOpt) {
   const templates = (validateTemplatesOpt && validateTemplatesOpt.length)
     ? validateTemplatesOpt
@@ -264,19 +272,18 @@ async function validateMacDetailed(mac17, validateTemplatesOpt) {
   for (const tpl of templates) {
     const url = fill(tpl, { mac: mac17 });
     try {
+      const host = new URL(url).host;
       const r = await axios.get(url, {
-        headers: BROWSER_HEADERS,
+        headers: headersFor(host),
         timeout: VALIDATE_TIMEOUT_MS,
         validateStatus: () => true
       });
       const snippet = typeof r.data === "string" ? r.data : JSON.stringify(r.data);
       const state = decideValidateState(r.status, r.data);
-      const host = new URL(url).host;
       console.log("validateMac:", host, "->", state, "status:", r.status);
       last = { state, status: r.status, snippet, host };
-      // só retorna cedo se encontrou "valid"
-      if (state === "valid") return last;
-      // invalid/unknown → continue tentando outros hosts
+      if (state === "valid") return last; // só retorna cedo em "valid"
+      // invalid/unknown → segue para próximo host
     } catch (e) {
       last = { state: "unknown", status: 0, snippet: e.message, host: null };
     }
@@ -308,40 +315,52 @@ function shouldRetry(status, msg) {
 async function postMultipart({ endpoint, mac, url, name }) {
   const ctrl = new AbortController();
   const to = setTimeout(() => ctrl.abort(), UPLOAD_TIMEOUT_MS);
+  const host = new URL(endpoint).host;
+  const hdrs = headersFor(host);
   try {
     const fd = new FormData();
     fd.append("name", name ?? "");
     fd.append("mac", String(mac || "").toLowerCase());
     fd.append("url", url);
-    const res = await fetch(endpoint, { method: "POST", headers: BROWSER_HEADERS, body: fd, signal: ctrl.signal, redirect: "follow" });
+    const res = await fetch(endpoint, { method: "POST", headers: hdrs, body: fd, signal: ctrl.signal, redirect: "follow" });
     const text = await res.text();
     let json; try { json = JSON.parse(text); } catch { json = { raw: text }; }
     const ok = res.ok && looksOk(json);
-    console.log("upload MULTIPART:", res.status, ok, text.slice(0, 200));
+    console.log("upload MULTIPART:", host, res.status, ok, text.slice(0, 200));
     return { ok, status: res.status, raw: json };
   } catch (e) {
-    console.log("upload multipart error:", e.message);
+    console.log("upload multipart error:", host, e.message);
     return { ok: false, status: 0, raw: e.message };
   } finally {
     clearTimeout(to);
   }
 }
 async function postFormURLEncoded({ endpoint, mac, url, name }) {
+  const host = new URL(endpoint).host;
   try {
     const body = new URLSearchParams({ mac: String(mac).toLowerCase(), url, name }).toString();
-    const r = await axios.post(endpoint, body, { headers: { ...BROWSER_HEADERS, "Content-Type": "application/x-www-form-urlencoded" }, timeout: UPLOAD_TIMEOUT_MS, validateStatus: () => true });
+    const r = await axios.post(endpoint, body, {
+      headers: { ...headersFor(host), "Content-Type": "application/x-www-form-urlencoded" },
+      timeout: UPLOAD_TIMEOUT_MS,
+      validateStatus: () => true
+    });
     const ok = (r.status >= 200 && r.status < 300 && looksOk(r.data));
-    console.log("upload FORM:", r.status, ok, (typeof r.data === "string" ? r.data : JSON.stringify(r.data)).slice(0, 200));
+    console.log("upload FORM:", host, r.status, ok, (typeof r.data === "string" ? r.data : JSON.stringify(r.data)).slice(0, 200));
     return { ok, status: r.status, raw: r.data };
   } catch (e) {
     return { ok: false, status: 0, raw: e.message };
   }
 }
 async function postJSON({ endpoint, mac, url, name }) {
+  const host = new URL(endpoint).host;
   try {
-    const r = await axios.post(endpoint, { mac: String(mac).toLowerCase(), url, name }, { headers: { ...BROWSER_HEADERS, "Content-Type": "application/json" }, timeout: UPLOAD_TIMEOUT_MS, validateStatus: () => true });
+    const r = await axios.post(endpoint, { mac: String(mac).toLowerCase(), url, name }, {
+      headers: { ...headersFor(host), "Content-Type": "application/json" },
+      timeout: UPLOAD_TIMEOUT_MS,
+      validateStatus: () => true
+    });
     const ok = (r.status >= 200 && r.status < 300 && looksOk(r.data));
-    console.log("upload JSON:", r.status, ok, (typeof r.data === "string" ? r.data : JSON.stringify(r.data)).slice(0, 200));
+    console.log("upload JSON:", host, r.status, ok, (typeof r.data === "string" ? r.data : JSON.stringify(r.data)).slice(0, 200));
     return { ok, status: r.status, raw: r.data };
   } catch (e) {
     return { ok: false, status: 0, raw: e.message };
@@ -427,7 +446,7 @@ app.post("/gerar-link-sync", async (req, res) => {
 
   const name = String(displayName || "").slice(0, 64);
 
-  // Em AUTO: só prende no host validado se a validação foi POSITIVA; senão tenta TODA a lista
+  // Em AUTO: se validou num host, ancora nele; senão tenta TODOS
   const chosenUpload =
     (wantAuto && v.state === "valid" && v.host)
       ? [`https://${v.host}/api/playlist_with_mac`]
@@ -439,6 +458,7 @@ app.post("/gerar-link-sync", async (req, res) => {
 
   const uploadHost = new URL(chosenUpload?.[0] || uploadEndpoints[0]).host;
   const brand = pickBrand(body?.displayName, uploadHost);
+  console.log("brand-debug/sync", { uploadHost, brand });
 
   if (success && (reply_to_phone || reply_to_chat)) {
     await talkSend({
@@ -447,7 +467,7 @@ app.post("/gerar-link-sync", async (req, res) => {
     });
   }
 
-  // Em AUTO: se ninguém aceitou e a validação não foi 'valid', trate como falha de upload/infra
+  // Em AUTO: se ninguém aceitou e a validação não foi 'valid', trate como falha infra
   if (!success && wantAuto) {
     return res.status(502).json({
       ok: false,
@@ -522,6 +542,7 @@ app.post("/gerar-link", async (req, res) => {
     const success = up.ok && up.status === 200;
     const uploadHost = new URL(chosenUpload?.[0] || uploadEndpoints[0]).host;
     const brand = pickBrand(body?.displayName, uploadHost);
+    console.log("brand-debug/async", { uploadHost, brand });
 
     if (success && (reply_to_phone || reply_to_chat)) {
       await talkSend({
@@ -582,6 +603,7 @@ app.post("/_probe", async (req, res) => {
 
   const uploadHost = new URL(chosenUpload?.[0] || uploadEndpoints[0]).host;
   const brand = pickBrand(body?.displayName, uploadHost);
+  console.log("brand-debug/probe", { uploadHost, brand });
 
   res.json({
     ok: true,
