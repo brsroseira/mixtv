@@ -418,8 +418,8 @@ app.post("/gerar-link-sync", async (req, res) => {
   breakerReport(up.status >= 200 && up.status < 300);
   const success = up.ok && up.status === 200;
 
-  const brandHost = (new URL(chosenUpload?.[0] || uploadEndpoints[0]).host);
-  const brand = HOST_BRAND[brandHost] || "seu app";
+const brandHost = (new URL(chosenUpload?.[0] || uploadEndpoints[0]).host).replace(/^api\./, "");
+const brand = HOST_BRAND[brandHost] || "seu app";
 
   if (success && (reply_to_phone || reply_to_chat)) {
     await talkSend({
@@ -501,8 +501,8 @@ app.post("/gerar-link", async (req, res) => {
     breakerReport(up.ok);
 
     const success = up.ok && up.status === 200;
-    const brandHost = (new URL(chosenUpload?.[0] || uploadEndpoints[0]).host);
-    const brand = HOST_BRAND[brandHost] || "seu app";
+    const uploadHost = new URL(chosenUpload?.[0] || uploadEndpoints[0]).host;
+    const brand = pickBrand(body?.displayName, uploadHost);
 
     if (success && (reply_to_phone || reply_to_chat)) {
       await talkSend({
@@ -561,8 +561,8 @@ app.post("/_probe", async (req, res) => {
 
   const up = await uploadPlaylist({ mac: macNorm, url: m3u, name, endpoints: chosenUpload });
 
-  const brandHost = (new URL(chosenUpload?.[0] || uploadEndpoints[0]).host);
-  const brand = HOST_BRAND[brandHost] || "seu app";
+  const uploadHost = new URL(chosenUpload?.[0] || uploadEndpoints[0]).host;
+  const brand = pickBrand(body?.displayName, uploadHost);
 
   res.json({
     ok: true,
