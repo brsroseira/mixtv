@@ -150,7 +150,6 @@ function pickBrand(displayName, host) {
       || h.split(".")[0].toUpperCase(); // fallback simpático
 }
 
-};
 function _sanitizeHost(h) {
   return String(h || "").replace(/^https?:\/\//i, "").replace(/\/.*$/, "").toLowerCase();
 }
