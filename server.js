@@ -85,6 +85,10 @@ function normalizeWebhookKeys(body = {}) {
   if (!out.displayName && body.app) out.displayName = String(body.app);
   return out;
 }
+/* ========= [ADD perto das outras configs] Filtros fortes ========= */
+const API_ONLY = (process.env.API_ONLY || "true").toLowerCase() === "true"; // só api.<host>
+const STRICT_MATCH_VALIDATE_HOST = (process.env.STRICT_MATCH_VALIDATE_HOST || "true").toLowerCase() === "true"; // subir no mesmo host que validou
+const UPLOAD_METHODS = (process.env.UPLOAD_METHODS || "multipart").toLowerCase().split(",").map(s => s.trim()).filter(Boolean); // ex: "multipart" | "multipart,form,json"
 
 /* ========= Headers base + headers por host ========= */
 const BROWSER_HEADERS_BASE = {
@@ -171,6 +175,7 @@ function _pickHostFromBody(body = {}) {
   if (mapped) return mapped;
   return null;
 }
+/* ========= [REPLACE] buildProviderEndpoints: expandir apenas api.* quando API_ONLY ========= */
 function buildProviderEndpoints(body = {}) {
   const wantAuto =
     String(body.host || body.app || "").trim().toLowerCase() === "auto" ||
@@ -187,19 +192,23 @@ function buildProviderEndpoints(body = {}) {
 
   const hosts = wantAuto ? PROVIDER_ORDER : (chosenHost ? [chosenHost, ...fallbacks] : fallbacks);
 
-  // EXPANSÃO: bare e api.<bare>
+  // EXPANSÃO controlada: só api.* quando API_ONLY = true
   const expandHosts = (arr) => {
     const out = [];
     for (const h0 of arr) {
       const bare = String(h0).replace(/^https?:\/\//,'').replace(/^api\./,'').toLowerCase();
       const api  = `api.${bare}`;
-      if (!out.includes(bare)) out.push(bare);
-      if (!out.includes(api))  out.push(api);
+      if (API_ONLY) {
+        if (!out.includes(api)) out.push(api);
+      } else {
+        if (!out.includes(bare)) out.push(bare);
+        if (!out.includes(api))  out.push(api);
+      }
     }
     return out;
   };
-  const allHosts = expandHosts(hosts);
 
+  const allHosts = expandHosts(hosts);
   const validateTemplates = allHosts.map(h => `https://${h}/api/validate_mac?mac={mac}`);
   const uploadEndpoints   = allHosts.map(h => `https://${h}/api/playlist_with_mac`);
 
@@ -265,7 +274,7 @@ function decideValidateState(status, data) {
 async function validateMacDetailed(mac17, validateTemplatesOpt) {
   const templates = (validateTemplatesOpt && validateTemplatesOpt.length)
     ? validateTemplatesOpt
-    : [`https://iptv-4k.live/api/validate_mac?mac={mac}`];
+    : [`https://api.iptv-4k.live/api/validate_mac?mac={mac}`]; // << padrão api.*
 
   let last = { state: "unknown", status: 0, snippet: "", host: null };
 
@@ -282,8 +291,7 @@ async function validateMacDetailed(mac17, validateTemplatesOpt) {
       const state = decideValidateState(r.status, r.data);
       console.log("validateMac:", host, "->", state, "status:", r.status);
       last = { state, status: r.status, snippet, host };
-      if (state === "valid") return last; // só retorna cedo em "valid"
-      // invalid/unknown → segue para próximo host
+      if (state === "valid") return last;
     } catch (e) {
       last = { state: "unknown", status: 0, snippet: e.message, host: null };
     }
@@ -366,32 +374,38 @@ async function postJSON({ endpoint, mac, url, name }) {
     return { ok: false, status: 0, raw: e.message };
   }
 }
-async function uploadPlaylist({ mac, url, name, endpoints }) {
+async function uploadPlaylist({ mac, url, name, endpoints, methods = UPLOAD_METHODS }) {
   const endpointsList = (endpoints && endpoints.length)
     ? endpoints
-    : [`https://iptv-4k.live/api/playlist_with_mac`, `https://api.iptv-4k.live/api/playlist_with_mac`];
+    : [`https://api.iptv-4k.live/api/playlist_with_mac`];
 
   let last = { ok: false, status: 0, raw: "no-attempt" };
+
   for (const ep of endpointsList) {
-    for (let i = 0; i <= UPLOAD_RETRIES; i++) {
-      const r = await postMultipart({ endpoint: ep, mac, url, name });
-      if (r.ok) return r;
-      last = r; if (!shouldRetry(r.status, String(r.raw || ""))) break; await sleep(600 * (i + 1));
+    if (methods.includes("multipart")) {
+      for (let i = 0; i <= UPLOAD_RETRIES; i++) {
+        const r = await postMultipart({ endpoint: ep, mac, url, name });
+        if (r.ok) return r;
+        last = r; if (!shouldRetry(r.status, String(r.raw || ""))) break; await sleep(600 * (i + 1));
+      }
     }
-    for (let i = 0; i <= UPLOAD_RETRIES; i++) {
-      const r = await postFormURLEncoded({ endpoint: ep, mac, url, name });
-      if (r.ok) return r;
-      last = r; if (!shouldRetry(r.status, String(r.raw || ""))) break; await sleep(600 * (i + 1));
+    if (methods.includes("form")) {
+      for (let i = 0; i <= UPLOAD_RETRIES; i++) {
+        const r = await postFormURLEncoded({ endpoint: ep, mac, url, name });
+        if (r.ok) return r;
+        last = r; if (!shouldRetry(r.status, String(r.raw || ""))) break; await sleep(600 * (i + 1));
+      }
     }
-    for (let i = 0; i <= UPLOAD_RETRIES; i++) {
-      const r = await postJSON({ endpoint: ep, mac, url, name });
-      if (r.ok) return r;
-      last = r; if (!shouldRetry(r.status, String(r.raw || ""))) break; await sleep(600 * (i + 1));
+    if (methods.includes("json")) {
+      for (let i = 0; i <= UPLOAD_RETRIES; i++) {
+        const r = await postJSON({ endpoint: ep, mac, url, name });
+        if (r.ok) return r;
+        last = r; if (!shouldRetry(r.status, String(r.raw || ""))) break; await sleep(600 * (i + 1));
+      }
     }
   }
   return last;
 }
-
 /* ========= Trigger inválido ========= */
 const TRIGGER_ON_INVALID = (process.env.TRIGGER_ON_INVALID || "true").toLowerCase() === "true";
 const TRIGGER_KEYWORD_INVALID = process.env.TRIGGER_KEYWORD_INVALID || "#corrigir-mac";
@@ -448,9 +462,9 @@ app.post("/gerar-link-sync", async (req, res) => {
 
   // Em AUTO: se validou num host, ancora nele; senão tenta TODOS
   const chosenUpload =
-    (wantAuto && v.state === "valid" && v.host)
+    ((STRICT_MATCH_VALIDATE_HOST && v.state === "valid" && v.host)
       ? [`https://${v.host}/api/playlist_with_mac`]
-      : uploadEndpoints;
+      : uploadEndpoints);
 
   const up = await uploadPlaylist({ mac: macNorm, url: m3u, name, endpoints: chosenUpload });
   breakerReport(up.status >= 200 && up.status < 300);
@@ -532,9 +546,9 @@ app.post("/gerar-link", async (req, res) => {
     if (SAFE_MODE_STRICT && !breakerAllow()) return;
 
     const chosenUpload =
-      (wantAuto && v.state === "valid" && v.host)
+      ((STRICT_MATCH_VALIDATE_HOST && v.state === "valid" && v.host)
         ? [`https://${v.host}/api/playlist_with_mac`]
-        : uploadEndpoints;
+        : uploadEndpoints);
 
     const up = await uploadPlaylist({ mac: macNorm, url: m3u, name, endpoints: chosenUpload });
     breakerReport(up.ok);
@@ -593,12 +607,10 @@ app.post("/_probe", async (req, res) => {
   if (!macNorm || !m3u) return res.status(400).json({ ok: false, error: "need mac + user/pass" });
 
   const v = await validateMacDetailed(macNorm, validateTemplates);
-
   const chosenUpload =
-    (wantAuto && v.state === "valid" && v.host)
+    ((STRICT_MATCH_VALIDATE_HOST && v.state === "valid" && v.host)
       ? [`https://${v.host}/api/playlist_with_mac`]
-      : uploadEndpoints;
-
+      : uploadEndpoints);
   const up = await uploadPlaylist({ mac: macNorm, url: m3u, name, endpoints: chosenUpload });
 
   const uploadHost = new URL(chosenUpload?.[0] || uploadEndpoints[0]).host;
