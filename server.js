@@ -16,7 +16,7 @@ const TALK_FROM_PHONE = process.env.TALK_FROM_PHONE || "+5573981731354";
 const authHeader = () => `Bearer ${(TALK_TOKEN || "").replace(/^Bearer\s+/i, "").trim()}`;
 
 /* ========= M3U base ========= */
-const M3U_BASE_DEFAULT   = process.env.M3U_BASE_DEFAULT   || "http://aptxu.com/get.php";
+const M3U_BASE_DEFAULT   = process.env.M3U_BASE_DEFAULT   || "http://junkb11.com/get.php";
 const M3U_TYPE_DEFAULT   = process.env.M3U_TYPE_DEFAULT   || "m3u_plus";
 const M3U_OUTPUT_DEFAULT = process.env.M3U_OUTPUT_DEFAULT || "hls";
 
